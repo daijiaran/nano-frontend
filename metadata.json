@@ -1,0 +1,7 @@
+{
+  "name": "NanoBanana Pro Image Studio",
+  "description": "A professional AI image generation workbench powered by Gemini 3 Pro Image (NanoBanana Pro), featuring reference image support, presets, and history management.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
