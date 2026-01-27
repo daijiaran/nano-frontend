@@ -12,13 +12,21 @@ import { api, buildFileUrl } from '../../services/api';
 
 // --- 可拖拽的分镜卡片组件 ---
 function SortableStoryboardCard({ item, onClick, onEdit, canEdit, isAdmin }: { item: ReviewStoryboard; onClick: () => void; onEdit: () => void; canEdit: boolean; isAdmin: boolean }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: item.id });
-  
-  const style = transform ? {
-    transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
     transition,
-    willChange: 'transform', // 提前告知浏览器优化
-  } : {};
+    isDragging // <--- 新增解构
+  } = useSortable({ id: item.id });
+  
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: isDragging ? 'none' : transition, // <--- 关键修复
+    zIndex: isDragging ? 999 : 'auto',
+    opacity: isDragging ? 0.8 : 1,
+  };
 
   // 状态颜色逻辑
   let statusColor = "bg-gray-800 border-gray-600"; // 未审阅

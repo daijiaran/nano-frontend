@@ -31,13 +31,22 @@ function SortableEpisodeCard({
   onEdit: () => void; 
   canEdit: boolean 
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: episode.id });
-  
-  const style = transform ? {
-    transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
     transition,
-    willChange: 'transform', // 提前告知浏览器优化
-  } : {};
+    isDragging // <--- 新增解构
+  } = useSortable({ id: episode.id });
+  
+  const style = {
+    transform: CSS.Transform.toString(transform), // 使用 dnd-kit 提供的工具函数
+    transition: isDragging ? 'none' : transition, // <--- 关键修复：拖拽时禁用过渡
+    zIndex: isDragging ? 999 : 'auto',            // <--- 优化：拖拽时层级置顶
+    opacity: isDragging ? 0.8 : 1,                // <--- 优化：拖拽时半透明
+    touchAction: 'none' // 优化触摸设备
+  };
 
   return (
     <div
