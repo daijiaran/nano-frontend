@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Plus, ArrowLeft, Image as ImageIcon, ChevronLeft, ChevronRight, X, Edit } from 'lucide-react';
-import { DndContext, closestCenter, DragEndEvent } from '@dnd-kit/core';
+import { DndContext, closestCenter, DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy, rectSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
@@ -14,10 +14,11 @@ import { api, buildFileUrl } from '../../services/api';
 function SortableStoryboardCard({ item, onClick, onEdit, canEdit, isAdmin }: { item: ReviewStoryboard; onClick: () => void; onEdit: () => void; canEdit: boolean; isAdmin: boolean }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: item.id });
   
-  const style = {
-    transform: CSS.Transform.toString(transform),
+  const style = transform ? {
+    transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
     transition,
-  };
+    willChange: 'transform', // 提前告知浏览器优化
+  } : {};
 
   // 状态颜色逻辑
   let statusColor = "bg-gray-800 border-gray-600"; // 未审阅
@@ -81,6 +82,17 @@ export default function EpisodeDetailsPage() {
   const [storyboards, setStoryboards] = useState<ReviewStoryboard[]>([]);
   const [user, setUser] = useState<User | null>(null);
   
+  // --- 新增传感器配置 --- 
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        delay: 0, // 消除激活延迟
+        tolerance: 5, // 降低拖拽触发阈值
+      },
+    })
+  );
+  // --------------------
+  
   // 创建Modal状态
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -119,19 +131,20 @@ export default function EpisodeDetailsPage() {
   };
 
   // 拖拽结束处理
-  const handleDragEnd = async (event: DragEndEvent) => {
+  const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
       setStoryboards((items) => {
         const oldIndex = items.findIndex(i => i.id === active.id);
         const newIndex = items.findIndex(i => i.id === over.id);
-        const newItems = arrayMove(items, oldIndex, newIndex);
-        
-        // 异步发送排序请求，不阻塞UI
-        reorderStoryboards(newItems.map(i => i.id)).catch(err => {
-          console.error('排序失败:', err);
-        });
-        return newItems;
+        return arrayMove(items, oldIndex, newIndex);
+      });
+      
+      // 分离异步请求，不阻塞UI更新
+      const newOrder = storyboards.map(i => i.id);
+      reorderStoryboards(newOrder).catch(err => {
+        console.error('排序失败:', err);
+        // 可以添加失败回滚逻辑
       });
     }
   };
@@ -229,7 +242,7 @@ export default function EpisodeDetailsPage() {
         </button>
       </div>
 
-      <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={storyboards} strategy={rectSortingStrategy}>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {storyboards.length === 0 && !error && (

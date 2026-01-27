@@ -1,10 +1,80 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Plus, Clapperboard, ArrowLeft, Edit } from 'lucide-react';
-import { getEpisodes, createEpisode, getProjects, updateEpisode } from '../../services/reviewService';
+
+// --- 新增引用 ---
+import { DndContext, closestCenter, DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, rectSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+// ----------------
+
+import { 
+  getEpisodes, 
+  createEpisode, 
+  getProjects, 
+  updateEpisode, 
+  reorderEpisodes // <--- 新增引入
+} from '../../services/reviewService';
 import { ReviewEpisode, ReviewProject, User } from '../../types';
 import { Modal } from '../../components/Modal';
 import { api, buildFileUrl } from '../../services/api';
+
+// --- 新增可拖拽单集卡片组件 ---
+function SortableEpisodeCard({ 
+  episode, 
+  onClick, 
+  onEdit, 
+  canEdit 
+}: { 
+  episode: ReviewEpisode; 
+  onClick: () => void; 
+  onEdit: () => void; 
+  canEdit: boolean 
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: episode.id });
+  
+  const style = transform ? {
+    transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+    transition,
+    willChange: 'transform', // 提前告知浏览器优化
+  } : {};
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className="bg-gray-800 rounded-xl shadow hover:shadow-lg transition cursor-pointer overflow-hidden border border-gray-700 relative touch-none"
+    >
+      <div onClick={onClick}>
+        <div className="h-32 bg-gray-700 flex items-center justify-center">
+          {episode.coverFileId ? (
+            <img src={buildFileUrl(episode.coverFileId)} alt={episode.name} className="w-full h-full object-cover" />
+          ) : (
+            <Clapperboard size={32} className="text-gray-400" />
+          )}
+        </div>
+        <div className="p-4">
+          <h3 className="font-bold text-white">{episode.name}</h3>
+          <p className="text-sm text-gray-400 mt-1">创建日期: {new Date(episode.createdAt).toLocaleDateString()}</p>
+          <p className="text-sm text-gray-400">分镜数: {episode.storyboardCount || 0}</p>
+        </div>
+      </div>
+      {canEdit && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+          className="absolute top-2 right-2 p-2 bg-blue-600 rounded-full text-white hover:bg-blue-700 transition"
+        >
+          <Edit size={16} />
+        </button>
+      )}
+    </div>
+  );
+}
 
 export default function ProjectDetailsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -12,6 +82,18 @@ export default function ProjectDetailsPage() {
   const [episodes, setEpisodes] = useState<ReviewEpisode[]>([]);
   const [project, setProject] = useState<ReviewProject | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  
+  // --- 新增传感器配置 ---
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        delay: 0, // 消除激活延迟
+        tolerance: 5, // 降低拖拽触发阈值
+      },
+    })
+  );
+  // --------------------
+  
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
@@ -77,6 +159,25 @@ export default function ProjectDetailsPage() {
     setIsModalOpen(true);
   };
 
+  // --- 新增拖拽结束处理函数 ---
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setEpisodes((items) => {
+        const oldIndex = items.findIndex(i => i.id === active.id);
+        const newIndex = items.findIndex(i => i.id === over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+      
+      // 分离异步请求，不阻塞UI更新
+      const newOrder = episodes.map(i => i.id);
+      reorderEpisodes(newOrder).catch(err => {
+        console.error('排序失败:', err);
+        // 可以添加失败回滚逻辑
+      });
+    }
+  };
+
   return (
     <div className="container mx-auto p-6 bg-[#09090b] min-h-screen">
       {error && (
@@ -90,7 +191,7 @@ export default function ProjectDetailsPage() {
       </button>
       
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-white">{project?.name || '项目详情'} - 单集列表</h1>
+        <h1 className="text-2xl font-bold text-white">{project?.name || '项目详情'} - 单集列表 (可拖拽排序)</h1>
         <button
           onClick={() => setIsModalOpen(true)}
           className="bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-600"
@@ -99,45 +200,30 @@ export default function ProjectDetailsPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-        {episodes.length === 0 && !error && (
-          <div className="col-span-full text-center py-12 text-gray-400">
-            暂无单集，点击上方按钮创建
-          </div>
-        )}
-        {episodes.map((ep) => (
-          <div
-            key={ep.id}
-            className="bg-gray-800 rounded-xl shadow hover:shadow-lg transition cursor-pointer overflow-hidden border border-gray-700 relative"
-          >
-            <div onClick={() => navigate(`/review/episodes/${ep.id}`)}>
-              <div className="h-32 bg-gray-700 flex items-center justify-center">
-                {ep.coverFileId ? (
-                  <img src={buildFileUrl(ep.coverFileId)} alt={ep.name} className="w-full h-full object-cover" />
-                ) : (
-                  <Clapperboard size={32} className="text-gray-400" />
-                )}
+      {/* --- 修改列表区域：添加 DndContext 和 SortableContext --- */}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={episodes} strategy={rectSortingStrategy}>
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {episodes.length === 0 && !error && (
+              <div className="col-span-full text-center py-12 text-gray-400">
+                暂无单集，点击上方按钮创建
               </div>
-              <div className="p-4">
-                <h3 className="font-bold text-white">{ep.name}</h3>
-                <p className="text-sm text-gray-400 mt-1">创建日期: {new Date(ep.createdAt).toLocaleDateString()}</p>
-                <p className="text-sm text-gray-400">分镜数: {ep.storyboardCount || 0}</p>
-              </div>
-            </div>
-            {(user && (user.id === ep.userId || user.role === 'admin')) && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleEdit(ep);
-                }}
-                className="absolute top-2 right-2 p-2 bg-blue-600 rounded-full text-white hover:bg-blue-700 transition"
-              >
-                <Edit size={16} />
-              </button>
             )}
+            {episodes.map((ep) => {
+              const canEdit = user && (user.id === ep.userId || user.role === 'admin');
+              return (
+                <SortableEpisodeCard
+                  key={ep.id}
+                  episode={ep}
+                  onClick={() => navigate(`/review/episodes/${ep.id}`)}
+                  onEdit={() => handleEdit(ep)}
+                  canEdit={!!canEdit}
+                />
+              );
+            })}
           </div>
-        ))}
-      </div>
+        </SortableContext>
+      </DndContext>
 
       <Modal open={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingId(null); setNewName(''); setNewCover(null); setError(null); }} title={editingId ? "修改单集" : "新建一集"}>
         <div className="space-y-4">
