@@ -133,6 +133,7 @@ export interface ReferenceUpload {
 export interface ReviewProject {
   id: string;
   name: string;
+  userId: string;
   coverFileId?: string;
   episodeCount?: number;
   createdAt: number;
@@ -141,6 +142,7 @@ export interface ReviewProject {
 export interface ReviewEpisode {
   id: string;
   projectId: string;
+  userId: string;
   name: string;
   coverFileId?: string;
   storyboardCount?: number;
@@ -150,6 +152,7 @@ export interface ReviewEpisode {
 export interface ReviewStoryboard {
   id: string;
   episodeId: string;
+  userId: string;
   name: string;
   imageFileId: string;
   imageUrl?: string; // 后端返回的完整URL或通过FileID构建

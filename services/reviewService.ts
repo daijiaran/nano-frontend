@@ -85,6 +85,48 @@ export const updateStoryboardStatus = async (id: string, status: string, feedbac
   return res.json();
 };
 
+export const updateProject = async (id: string, name: string, cover?: File): Promise<ReviewProject> => {
+  const formData = new FormData();
+  formData.append('name', name);
+  if (cover) formData.append('cover', cover);
+
+  const res = await fetch(`${API_BASE}/projects/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: formData,
+  });
+  if (!res.ok) throw new Error('Failed to update project');
+  return res.json();
+};
+
+export const updateEpisode = async (id: string, name: string, cover?: File): Promise<ReviewEpisode> => {
+  const formData = new FormData();
+  formData.append('name', name);
+  if (cover) formData.append('cover', cover);
+
+  const res = await fetch(`${API_BASE}/episodes/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: formData,
+  });
+  if (!res.ok) throw new Error('Failed to update episode');
+  return res.json();
+};
+
+export const updateStoryboard = async (id: string, name: string, image?: File): Promise<ReviewStoryboard> => {
+  const formData = new FormData();
+  formData.append('name', name);
+  if (image) formData.append('image', image);
+
+  const res = await fetch(`${API_BASE}/storyboards/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: formData,
+  });
+  if (!res.ok) throw new Error('Failed to update storyboard');
+  return res.json();
+};
+
 export const reorderStoryboards = async (storyboardIds: string[]) => {
   const res = await fetch(`${API_BASE}/storyboards/reorder`, {
     method: 'PUT',

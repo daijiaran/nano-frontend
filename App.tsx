@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { api, clearAuthToken, getAuthToken } from './services/api';
 import type { ModelInfo, User } from './types';
 import { LoginPage } from './pages/LoginPage';
@@ -41,6 +41,7 @@ function AppContent() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [providerOpen, setProviderOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   // 从裁切工具传递到图片生成页面的参考图
   const slicerReferenceFilesRef = useRef<File[]>([]);
@@ -102,6 +103,13 @@ function AppContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 监听路径变化，自动切换Tab
+  useEffect(() => {
+    if (location.pathname.startsWith('/review')) {
+      setTab('review');
+    }
+  }, [location.pathname]);
+
   async function handleLogin(username: string, password: string) {
     setLoginError(null);
     try {
@@ -117,6 +125,16 @@ function AppContent() {
   }
 
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+
+  // 修改：Tab 切换处理函数
+  const handleTabChange = (newTab: Tab) => {
+    setTab(newTab);
+    if (newTab === 'review') {
+      navigate('/review');
+    } else {
+      navigate('/');
+    }
+  };
 
   async function handleLogout() {
     try {
@@ -166,7 +184,14 @@ function AppContent() {
       return <LibraryPage />;
     }
     if (tab === 'review') {
-      return <ReviewProjectsPage />;
+      return (
+        <Routes>
+          <Route path="/review" element={<ReviewProjectsPage />} />
+          <Route path="/review/projects/:projectId" element={<ProjectDetailsPage />} />
+          <Route path="/review/episodes/:episodeId" element={<EpisodeDetailsPage />} />
+          <Route path="*" element={<Navigate to="/review" replace />} />
+        </Routes>
+      );
     }
     if (tab === 'admin') {
       return <AdminPage />;
@@ -192,23 +217,23 @@ function AppContent() {
       <div className="flex h-full w-full min-h-0 flex-col overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-white/5 px-6 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-3">
-            <TabButton active={tab === 'image'} onClick={() => setTab('image')}>
+            <TabButton active={tab === 'image'} onClick={() => handleTabChange('image')}>
               图片生成
             </TabButton>
-            <TabButton active={tab === 'slicer'} onClick={() => setTab('slicer')}>
+            <TabButton active={tab === 'slicer'} onClick={() => handleTabChange('slicer')}>
               裁切工具
             </TabButton>
-            <TabButton active={tab === 'video'} onClick={() => setTab('video')}>
+            <TabButton active={tab === 'video'} onClick={() => handleTabChange('video')}>
               视频生成
             </TabButton>
-            <TabButton active={tab === 'library'} onClick={() => setTab('library')}>
+            <TabButton active={tab === 'library'} onClick={() => handleTabChange('library')}>
               角色/场景库
             </TabButton>
-            <TabButton active={tab === 'review'} onClick={() => setTab('review')}>
+            <TabButton active={tab === 'review'} onClick={() => handleTabChange('review')}>
               影视审阅
             </TabButton>
             {isAdmin ? (
-              <TabButton active={tab === 'admin'} onClick={() => setTab('admin')}>
+              <TabButton active={tab === 'admin'} onClick={() => handleTabChange('admin')}>
                 管理
               </TabButton>
             ) : null}
@@ -281,11 +306,8 @@ export default function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<AppContent />} />
-        <Route path="/review" element={<ReviewProjectsPage />} />
-        <Route path="/review/projects/:projectId" element={<ProjectDetailsPage />} />
-        <Route path="/review/episodes/:episodeId" element={<EpisodeDetailsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* 将所有路径都匹配给 AppContent，由 AppContent 内部决定显示什么 */}
+        <Route path="/*" element={<AppContent />} />
       </Routes>
     </Router>
   );

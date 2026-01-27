@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Plus, ArrowLeft, Image as ImageIcon, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Plus, ArrowLeft, Image as ImageIcon, ChevronLeft, ChevronRight, X, Edit } from 'lucide-react';
 import { DndContext, closestCenter, DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy, rectSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
-import { getStoryboards, createStoryboard, reorderStoryboards, updateStoryboardStatus } from '../../services/reviewService';
-import { ReviewStoryboard } from '../../types';
+import { getStoryboards, createStoryboard, reorderStoryboards, updateStoryboardStatus, updateStoryboard } from '../../services/reviewService';
+import { ReviewStoryboard, User } from '../../types';
 import { Modal } from '../../components/Modal';
+import { api, buildFileUrl } from '../../services/api';
 
 // --- 可拖拽的分镜卡片组件 ---
-function SortableStoryboardCard({ item, onClick }: { item: ReviewStoryboard; onClick: () => void }) {
+function SortableStoryboardCard({ item, onClick, onEdit, canEdit, isAdmin }: { item: ReviewStoryboard; onClick: () => void; onEdit: () => void; canEdit: boolean; isAdmin: boolean }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: item.id });
   
   const style = {
@@ -19,9 +20,9 @@ function SortableStoryboardCard({ item, onClick }: { item: ReviewStoryboard; onC
   };
 
   // 状态颜色逻辑
-  let statusColor = "bg-gray-100 border-gray-300"; // 未审阅
-  if (item.status === 'approved') statusColor = "bg-green-50 border-green-500 ring-1 ring-green-500";
-  if (item.status === 'rejected') statusColor = "bg-red-50 border-red-500 ring-1 ring-red-500";
+  let statusColor = "bg-gray-800 border-gray-600"; // 未审阅
+  if (item.status === 'approved') statusColor = "bg-green-900/40 border-green-600 ring-1 ring-green-500";
+  if (item.status === 'rejected') statusColor = "bg-red-900/40 border-red-600 ring-1 ring-red-500";
 
   return (
     <div
@@ -29,23 +30,46 @@ function SortableStoryboardCard({ item, onClick }: { item: ReviewStoryboard; onC
       style={style}
       {...attributes}
       {...listeners}
-      onClick={onClick}
       className={`relative aspect-video rounded-lg overflow-hidden border-2 cursor-pointer hover:shadow-md transition group ${statusColor}`}
     >
       <img 
-        src={item.imageUrl || `/api/files/${item.imageFileId}`} 
+        src={item.imageUrl || buildFileUrl(item.imageFileId)} 
         alt="storyboard" 
         className="w-full h-full object-cover" 
       />
-      <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-1 opacity-0 group-hover:opacity-100 transition">
-        点击审阅
+      <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-xs p-1 opacity-0 group-hover:opacity-100 transition">
+        {isAdmin ? '点击审阅' : '点击查看'}
       </div>
       {/* 状态角标 */}
-      <div className="absolute top-1 right-1 px-2 py-0.5 rounded text-xs font-bold text-white bg-black/40 backdrop-blur-sm">
+      <div className="absolute top-1 right-1 px-2 py-0.5 rounded text-xs font-bold text-white bg-black/60 backdrop-blur-sm">
         {item.status === 'pending' && '待审'}
         {item.status === 'approved' && '通过'}
         {item.status === 'rejected' && '驳回'}
       </div>
+      {/* 编辑按钮 */}
+      {canEdit && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+          className="absolute top-2 left-2 p-2 bg-blue-600 rounded-full text-white hover:bg-blue-700 transition opacity-0 group-hover:opacity-100"
+        >
+          <Edit size={16} />
+        </button>
+      )}
+      {/* 审阅按钮 (仅管理员可见) */}
+      {isAdmin && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onClick();
+          }}
+          className="absolute top-2 right-2 p-2 bg-green-600 rounded-full text-white hover:bg-green-700 transition opacity-0 group-hover:opacity-100"
+        >
+          <ImageIcon size={16} />
+        </button>
+      )}
     </div>
   );
 }
@@ -55,9 +79,11 @@ export default function EpisodeDetailsPage() {
   const { episodeId } = useParams<{ episodeId: string }>();
   const navigate = useNavigate();
   const [storyboards, setStoryboards] = useState<ReviewStoryboard[]>([]);
+  const [user, setUser] = useState<User | null>(null);
   
   // 创建Modal状态
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [newImage, setNewImage] = useState<File | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -71,7 +97,17 @@ export default function EpisodeDetailsPage() {
 
   useEffect(() => {
     if (episodeId) loadData();
+    loadUser();
   }, [episodeId]);
+
+  const loadUser = async () => {
+    try {
+      const me = await api.me();
+      setUser(me);
+    } catch (err) {
+      console.error('加载用户信息失败:', err);
+    }
+  };
 
   const loadData = () => {
     if (episodeId) {
@@ -102,21 +138,33 @@ export default function EpisodeDetailsPage() {
 
   // 创建分镜
   const handleCreate = async () => {
-    if (!episodeId || !newImage) return;
+    if (!episodeId || (!newImage && !editingId)) return;
     setIsCreating(true);
     setError(null);
     try {
-      await createStoryboard(episodeId, newName || '未命名分镜', newImage);
+      if (editingId) {
+        await updateStoryboard(editingId, newName || '未命名分镜', newImage || undefined);
+      } else {
+        await createStoryboard(episodeId, newName || '未命名分镜', newImage);
+      }
       setIsCreateOpen(false);
+      setEditingId(null);
       setNewName('');
       setNewImage(null);
       loadData();
     } catch (err: any) {
-      console.error('创建分镜失败:', err);
-      setError(err.message || '创建分镜失败');
+      console.error(editingId ? '更新分镜失败:' : '创建分镜失败:', err);
+      setError(err.message || (editingId ? '更新分镜失败' : '创建分镜失败'));
     } finally {
       setIsCreating(false);
     }
+  };
+
+  const handleEdit = (storyboard: ReviewStoryboard) => {
+    setEditingId(storyboard.id);
+    setNewName(storyboard.name);
+    setNewImage(null);
+    setIsCreateOpen(true);
   };
 
   // 审阅逻辑
@@ -160,22 +208,22 @@ export default function EpisodeDetailsPage() {
   };
 
   return (
-    <div className="container mx-auto p-6">
+    <div className="container mx-auto p-6 bg-[#09090b] min-h-screen">
       {error && (
-        <div className="mb-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-200 text-sm">
+        <div className="mb-4 p-4 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm">
           {error}
-          <button onClick={() => setError(null)} className="ml-4 text-red-300 hover:text-red-100">关闭</button>
+          <button onClick={() => setError(null)} className="ml-4 text-red-400 hover:text-red-200">关闭</button>
         </div>
       )}
-      <button onClick={() => navigate(-1)} className="flex items-center text-gray-500 hover:text-gray-800 mb-4">
+      <button onClick={() => navigate(-1)} className="flex items-center text-gray-400 hover:text-white mb-4">
         <ArrowLeft size={16} className="mr-1" /> 返回单集
       </button>
 
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">分镜列表 (可拖拽排序)</h1>
+        <h1 className="text-2xl font-bold text-white">分镜列表 (可拖拽排序)</h1>
         <button
           onClick={() => setIsCreateOpen(true)}
-          className="bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-800"
+          className="bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-600"
         >
           <Plus size={20} /> 新建分镜
         </button>
@@ -185,23 +233,30 @@ export default function EpisodeDetailsPage() {
         <SortableContext items={storyboards} strategy={rectSortingStrategy}>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {storyboards.length === 0 && !error && (
-              <div className="col-span-full text-center py-12 text-gray-500">
+              <div className="col-span-full text-center py-12 text-gray-400">
                 暂无分镜，点击上方按钮创建
               </div>
             )}
-            {storyboards.map((item) => (
-              <SortableStoryboardCard 
-                key={item.id} 
-                item={item} 
-                onClick={() => setReviewingId(item.id)} 
-              />
-            ))}
+            {storyboards.map((item) => {
+              const isAdmin = user?.role === 'admin';
+              const canEdit = user && (user.id === item.userId || user.role === 'admin');
+              return (
+                <SortableStoryboardCard 
+                  key={item.id} 
+                  item={item} 
+                  onClick={() => setReviewingId(item.id)} 
+                  onEdit={() => handleEdit(item)} 
+                  canEdit={canEdit} 
+                  isAdmin={isAdmin} 
+                />
+              );
+            })}
           </div>
         </SortableContext>
       </DndContext>
 
       {/* 创建分镜 Modal */}
-      <Modal open={isCreateOpen} onClose={() => setIsCreateOpen(false)} title="新建分镜">
+      <Modal open={isCreateOpen} onClose={() => setIsCreateOpen(false)} title={editingId ? "修改分镜" : "新建分镜"}>
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">分镜名称</label>
@@ -218,8 +273,8 @@ export default function EpisodeDetailsPage() {
           </div>
           <div className="flex justify-end gap-2 mt-4">
             <button onClick={() => setIsCreateOpen(false)} className="px-4 py-2 text-gray-600" disabled={isCreating}>取消</button>
-            <button onClick={handleCreate} disabled={isCreating || !newImage} className="px-4 py-2 bg-gray-700 text-white rounded disabled:bg-gray-400">
-              {isCreating ? '创建中...' : '确认'}
+            <button onClick={handleCreate} disabled={isCreating || (!newImage && !editingId)} className="px-4 py-2 bg-gray-700 text-white rounded disabled:bg-gray-500">
+              {isCreating ? (editingId ? '更新中...' : '创建中...') : '确认'}
             </button>
           </div>
         </div>
