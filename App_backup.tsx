@@ -33,14 +33,13 @@ function TabButton(props: {
   );
 }
 
-function AppContent() {
+export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [tab, setTab] = useState<Tab>('image');
   const [loading, setLoading] = useState(true);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [providerOpen, setProviderOpen] = useState(false);
-  const navigate = useNavigate();
 
   // 从裁切工具传递到图片生成页面的参考图
   const slicerReferenceFilesRef = useRef<File[]>([]);
@@ -274,19 +273,5 @@ function AppContent() {
         )}
       </div>
     </ErrorBoundary>
-  );
-}
-
-export default function App() {
-  return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<AppContent />} />
-        <Route path="/review" element={<ReviewProjectsPage />} />
-        <Route path="/review/projects/:projectId" element={<ProjectDetailsPage />} />
-        <Route path="/review/episodes/:episodeId" element={<EpisodeDetailsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Router>
   );
 }

@@ -1,0 +1,718 @@
+这是一个非常完整的前端功能扩展方案。为了实现这个“影视项目审阅”系统，我们需要构建新的API服务层、路由配置以及三个主要层级的页面（项目列表、项目详情/单集列表、单集详情/分镜列表）。
+
+为了实现“拖动排序”功能，我建议使用 React 生态中标准的 `@dnd-kit` 库。
+
+### 1. 基础准备
+
+首先，建议安装拖拽排序所需的依赖（如果你不想安装新依赖，也可以使用原生 HTML5 Drag API，但 `dnd-kit` 体验更佳）：
+
+```bash
+npm install @dnd-kit/core @dnd-kit/sortable @dnd-kit/utilities
+
+```
+
+### 2. 定义类型与 API 服务
+
+在 `src/types.ts` 中添加新的数据类型，并创建 `src/services/reviewService.ts` 来处理与后端的交互。
+
+**修改 `src/types.ts**`：
+
+```typescript
+// 添加以下新类型
+export interface ReviewProject {
+  id: string;
+  name: string;
+  coverFileId?: string;
+  episodeCount?: number;
+  createdAt: number;
+}
+
+export interface ReviewEpisode {
+  id: string;
+  projectId: string;
+  name: string;
+  coverFileId?: string;
+  storyboardCount?: number;
+  createdAt: number;
+}
+
+export interface ReviewStoryboard {
+  id: string;
+  episodeId: string;
+  imageFileId: string;
+  imageUrl?: string; // 后端返回的完整URL或通过FileID构建
+  status: 'pending' | 'approved' | 'rejected';
+  feedback?: string;
+  sortOrder: number;
+  createdAt: number;
+}
+
+```
+
+**新建 `src/services/reviewService.ts**`：
+
+```typescript
+import { ReviewProject, ReviewEpisode, ReviewStoryboard } from '../types';
+
+const API_BASE = '/api/review';
+
+// 辅助：获取 Token
+const getHeaders = () => {
+  const token = localStorage.getItem('token');
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+};
+
+// --- 项目相关 ---
+export const getProjects = async (): Promise<ReviewProject[]> => {
+  const res = await fetch(`${API_BASE}/projects`, { headers: getHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch projects');
+  return res.json();
+};
+
+export const createProject = async (name: string, cover?: File): Promise<ReviewProject> => {
+  const formData = new FormData();
+  formData.append('name', name);
+  if (cover) formData.append('cover', cover);
+
+  const res = await fetch(`${API_BASE}/projects`, {
+    method: 'POST',
+    headers: getHeaders(), // FormData 不需要 Content-Type，浏览器会自动设置
+    body: formData,
+  });
+  if (!res.ok) throw new Error('Failed to create project');
+  return res.json();
+};
+
+// --- 单集相关 ---
+export const getEpisodes = async (projectId: string): Promise<ReviewEpisode[]> => {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/episodes`, { headers: getHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch episodes');
+  return res.json();
+};
+
+export const createEpisode = async (projectId: string, name: string, cover?: File): Promise<ReviewEpisode> => {
+  const formData = new FormData();
+  formData.append('name', name);
+  if (cover) formData.append('cover', cover);
+
+  const res = await fetch(`${API_BASE}/projects/${projectId}/episodes`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: formData,
+  });
+  if (!res.ok) throw new Error('Failed to create episode');
+  return res.json();
+};
+
+// --- 分镜相关 ---
+export const getStoryboards = async (episodeId: string): Promise<ReviewStoryboard[]> => {
+  const res = await fetch(`${API_BASE}/episodes/${episodeId}/storyboards`, { headers: getHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch storyboards');
+  return res.json();
+};
+
+export const createStoryboard = async (episodeId: string, name: string, image: File): Promise<ReviewStoryboard> => {
+  const formData = new FormData();
+  formData.append('name', name);
+  formData.append('image', image);
+
+  const res = await fetch(`${API_BASE}/episodes/${episodeId}/storyboards`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: formData,
+  });
+  if (!res.ok) throw new Error('Failed to create storyboard');
+  return res.json();
+};
+
+export const updateStoryboardStatus = async (id: string, status: string, feedback?: string) => {
+  const res = await fetch(`${API_BASE}/storyboards/${id}/status`, {
+    method: 'PATCH',
+    headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, feedback }),
+  });
+  if (!res.ok) throw new Error('Failed to update status');
+  return res.json();
+};
+
+export const reorderStoryboards = async (storyboardIds: string[]) => {
+  const res = await fetch(`${API_BASE}/storyboards/reorder`, {
+    method: 'PUT',
+    headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ storyboardIds }),
+  });
+  if (!res.ok) throw new Error('Failed to reorder');
+  return res.json();
+};
+
+```
+
+---
+
+### 3. UI 页面实现
+
+我们需要创建三个主要页面文件。
+
+#### 3.1 项目列表页：`src/pages/review/ReviewProjectsPage.tsx`
+
+```tsx
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Film } from 'lucide-react';
+import { getProjects, createProject } from '../../services/reviewService';
+import { ReviewProject } from '../../types';
+import Modal from '../../components/Modal';
+
+export default function ReviewProjectsPage() {
+  const navigate = useNavigate();
+  const [projects, setProjects] = useState<ReviewProject[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newCover, setNewCover] = useState<File | null>(null);
+
+  useEffect(() => {
+    loadProjects();
+  }, []);
+
+  const loadProjects = () => getProjects().then(setProjects);
+
+  const handleCreate = async () => {
+    if (!newName) return;
+    await createProject(newName, newCover || undefined);
+    setIsModalOpen(false);
+    setNewName('');
+    setNewCover(null);
+    loadProjects();
+  };
+
+  return (
+    <div className="container mx-auto p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold text-gray-800">影视项目审阅</h1>
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700"
+        >
+          <Plus size={20} /> 创建影视项目
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+        {projects.map((p) => (
+          <div
+            key={p.id}
+            onClick={() => navigate(`/review/projects/${p.id}`)}
+            className="bg-white rounded-xl shadow hover:shadow-lg transition cursor-pointer overflow-hidden border border-gray-100"
+          >
+            <div className="h-40 bg-gray-200 flex items-center justify-center">
+              {p.coverFileId ? (
+                <img src={`/api/files/${p.coverFileId}`} alt={p.name} className="w-full h-full object-cover" />
+              ) : (
+                <Film size={40} className="text-gray-400" />
+              )}
+            </div>
+            <div className="p-4">
+              <h3 className="font-bold text-lg">{p.name}</h3>
+              <p className="text-sm text-gray-500 mt-1">创建日期: {new Date(p.createdAt).toLocaleDateString()}</p>
+              <p className="text-sm text-gray-500">集数: {p.episodeCount || 0}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="创建影视项目">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">项目名称</label>
+            <input
+              className="w-full border rounded p-2"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">封面 (可选)</label>
+            <input
+              type="file"
+              onChange={(e) => setNewCover(e.target.files?.[0] || null)}
+              className="w-full"
+            />
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <button onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-600">取消</button>
+            <button onClick={handleCreate} className="px-4 py-2 bg-blue-600 text-white rounded">确认</button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+```
+
+#### 3.2 单集列表页：`src/pages/review/ProjectDetailsPage.tsx`
+
+```tsx
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Plus, Clapperboard, ArrowLeft } from 'lucide-react';
+import { getEpisodes, createEpisode, getProjects } from '../../services/reviewService';
+import { ReviewEpisode, ReviewProject } from '../../types';
+import Modal from '../../components/Modal';
+
+export default function ProjectDetailsPage() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
+  const [episodes, setEpisodes] = useState<ReviewEpisode[]>([]);
+  const [project, setProject] = useState<ReviewProject | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newCover, setNewCover] = useState<File | null>(null);
+
+  useEffect(() => {
+    if (projectId) {
+      loadData();
+      // 获取项目详情用于显示标题（虽然API没单独给GetProject，但可以从列表取或后端加接口，这里简化假设）
+      getProjects().then(list => setProject(list.find(p => p.id === projectId) || null));
+    }
+  }, [projectId]);
+
+  const loadData = () => {
+    if (projectId) getEpisodes(projectId).then(setEpisodes);
+  };
+
+  const handleCreate = async () => {
+    if (!projectId || !newName) return;
+    await createEpisode(projectId, newName, newCover || undefined);
+    setIsModalOpen(false);
+    setNewName('');
+    setNewCover(null);
+    loadData();
+  };
+
+  return (
+    <div className="container mx-auto p-6">
+      <button onClick={() => navigate('/review')} className="flex items-center text-gray-500 hover:text-gray-800 mb-4">
+        <ArrowLeft size={16} className="mr-1" /> 返回项目列表
+      </button>
+      
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold text-gray-800">{project?.name || '项目详情'} - 单集列表</h1>
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700"
+        >
+          <Plus size={20} /> 新建一集
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+        {episodes.map((ep) => (
+          <div
+            key={ep.id}
+            onClick={() => navigate(`/review/episodes/${ep.id}`)}
+            className="bg-white rounded-xl shadow hover:shadow-lg transition cursor-pointer overflow-hidden border border-gray-100"
+          >
+            <div className="h-32 bg-gray-100 flex items-center justify-center">
+              {ep.coverFileId ? (
+                <img src={`/api/files/${ep.coverFileId}`} alt={ep.name} className="w-full h-full object-cover" />
+              ) : (
+                <Clapperboard size={32} className="text-gray-400" />
+              )}
+            </div>
+            <div className="p-4">
+              <h3 className="font-bold">{ep.name}</h3>
+              <p className="text-sm text-gray-500 mt-1">创建日期: {new Date(ep.createdAt).toLocaleDateString()}</p>
+              <p className="text-sm text-gray-500">分镜数: {ep.storyboardCount || 0}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="新建一集">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">单集名称</label>
+            <input
+              className="w-full border rounded p-2"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">封面 (可选)</label>
+            <input type="file" onChange={(e) => setNewCover(e.target.files?.[0] || null)} className="w-full" />
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <button onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-600">取消</button>
+            <button onClick={handleCreate} className="px-4 py-2 bg-blue-600 text-white rounded">确认</button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+```
+
+#### 3.3 分镜详情页与审阅器：`src/pages/review/EpisodeDetailsPage.tsx`
+
+这个页面比较复杂，包含了拖拽排序和全屏审阅Modal。
+
+```tsx
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Plus, ArrowLeft, Image as ImageIcon, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { DndContext, closestCenter, DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy, rectSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+
+import { getStoryboards, createStoryboard, reorderStoryboards, updateStoryboardStatus } from '../../services/reviewService';
+import { ReviewStoryboard } from '../../types';
+import Modal from '../../components/Modal';
+
+// --- 可拖拽的分镜卡片组件 ---
+function SortableStoryboardCard({ item, onClick }: { item: ReviewStoryboard; onClick: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: item.id });
+  
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  // 状态颜色逻辑
+  let statusColor = "bg-gray-100 border-gray-300"; // 未审阅
+  if (item.status === 'approved') statusColor = "bg-green-50 border-green-500 ring-1 ring-green-500";
+  if (item.status === 'rejected') statusColor = "bg-red-50 border-red-500 ring-1 ring-red-500";
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClick={onClick}
+      className={`relative aspect-video rounded-lg overflow-hidden border-2 cursor-pointer hover:shadow-md transition group ${statusColor}`}
+    >
+      <img 
+        src={item.imageUrl || `/api/files/${item.imageFileId}`} 
+        alt="storyboard" 
+        className="w-full h-full object-cover" 
+      />
+      <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-1 opacity-0 group-hover:opacity-100 transition">
+        点击审阅
+      </div>
+      {/* 状态角标 */}
+      <div className="absolute top-1 right-1 px-2 py-0.5 rounded text-xs font-bold text-white bg-black/40 backdrop-blur-sm">
+        {item.status === 'pending' && '待审'}
+        {item.status === 'approved' && '通过'}
+        {item.status === 'rejected' && '驳回'}
+      </div>
+    </div>
+  );
+}
+
+// --- 主页面组件 ---
+export default function EpisodeDetailsPage() {
+  const { episodeId } = useParams<{ episodeId: string }>();
+  const navigate = useNavigate();
+  const [storyboards, setStoryboards] = useState<ReviewStoryboard[]>([]);
+  
+  // 创建Modal状态
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newImage, setNewImage] = useState<File | null>(null);
+
+  // 审阅Modal状态
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [isRejecting, setIsRejecting] = useState(false);
+
+  useEffect(() => {
+    if (episodeId) loadData();
+  }, [episodeId]);
+
+  const loadData = () => {
+    if (episodeId) getStoryboards(episodeId).then(setStoryboards);
+  };
+
+  // 拖拽结束处理
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setStoryboards((items) => {
+        const oldIndex = items.findIndex(i => i.id === active.id);
+        const newIndex = items.findIndex(i => i.id === over.id);
+        const newItems = arrayMove(items, oldIndex, newIndex);
+        
+        // 异步发送排序请求，不阻塞UI
+        reorderStoryboards(newItems.map(i => i.id));
+        return newItems;
+      });
+    }
+  };
+
+  // 创建分镜
+  const handleCreate = async () => {
+    if (!episodeId || !newImage) return;
+    await createStoryboard(episodeId, newName || '未命名分镜', newImage);
+    setIsCreateOpen(false);
+    setNewName('');
+    setNewImage(null);
+    loadData();
+  };
+
+  // 审阅逻辑
+  const activeStoryboard = storyboards.find(s => s.id === reviewingId);
+  const activeIndex = storyboards.findIndex(s => s.id === reviewingId);
+
+  const handleReviewAction = async (status: 'approved' | 'rejected') => {
+    if (!reviewingId) return;
+    if (status === 'rejected' && !isRejecting) {
+      setIsRejecting(true); // 显示输入框
+      return;
+    }
+
+    await updateStoryboardStatus(reviewingId, status, status === 'rejected' ? rejectReason : undefined);
+    
+    // 更新本地状态
+    setStoryboards(prev => prev.map(s => 
+      s.id === reviewingId ? { ...s, status, feedback: status === 'rejected' ? rejectReason : undefined } : s
+    ));
+
+    // 重置拒绝状态
+    setIsRejecting(false);
+    setRejectReason('');
+  };
+
+  const navigateReview = (direction: -1 | 1) => {
+    const newIndex = activeIndex + direction;
+    if (newIndex >= 0 && newIndex < storyboards.length) {
+      setReviewingId(storyboards[newIndex].id);
+      setIsRejecting(false);
+      setRejectReason('');
+    }
+  };
+
+  return (
+    <div className="container mx-auto p-6">
+      <button onClick={() => navigate(-1)} className="flex items-center text-gray-500 hover:text-gray-800 mb-4">
+        <ArrowLeft size={16} className="mr-1" /> 返回单集
+      </button>
+
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold text-gray-800">分镜列表 (可拖拽排序)</h1>
+        <button
+          onClick={() => setIsCreateOpen(true)}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700"
+        >
+          <Plus size={20} /> 新建分镜
+        </button>
+      </div>
+
+      <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={storyboards} strategy={rectSortingStrategy}>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            {storyboards.map((item) => (
+              <SortableStoryboardCard 
+                key={item.id} 
+                item={item} 
+                onClick={() => setReviewingId(item.id)} 
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+
+      {/* 创建分镜 Modal */}
+      <Modal isOpen={isCreateOpen} onClose={() => setIsCreateOpen(false)} title="新建分镜">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">分镜名称</label>
+            <input
+              className="w-full border rounded p-2"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="例如: 镜头1-全景"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">分镜图片 (必要)</label>
+            <input type="file" accept="image/*" onChange={(e) => setNewImage(e.target.files?.[0] || null)} className="w-full" />
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <button onClick={() => setIsCreateOpen(false)} className="px-4 py-2 text-gray-600">取消</button>
+            <button onClick={handleCreate} disabled={!newImage} className="px-4 py-2 bg-blue-600 text-white rounded disabled:bg-gray-400">确认</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 审阅全屏 Modal */}
+      {reviewingId && activeStoryboard && (
+        <div className="fixed inset-0 z-50 bg-black flex text-white">
+          {/* 左侧 3/4 图片展示区 */}
+          <div className="w-3/4 h-full relative flex items-center justify-center bg-gray-900">
+            <img 
+              src={activeStoryboard.imageUrl || `/api/files/${activeStoryboard.imageFileId}`} 
+              className="max-h-full max-w-full object-contain"
+              alt="Review" 
+            />
+            
+            {/* 导航按钮 */}
+            <button 
+              onClick={() => navigateReview(-1)} 
+              disabled={activeIndex === 0}
+              className="absolute left-4 p-2 bg-white/10 hover:bg-white/20 rounded-full disabled:opacity-30"
+            >
+              <ChevronLeft size={32} />
+            </button>
+            <button 
+              onClick={() => navigateReview(1)} 
+              disabled={activeIndex === storyboards.length - 1}
+              className="absolute right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full disabled:opacity-30"
+            >
+              <ChevronRight size={32} />
+            </button>
+
+            <button 
+              onClick={() => setReviewingId(null)}
+              className="absolute top-4 left-4 p-2 bg-black/50 hover:bg-black/70 rounded-full"
+            >
+              <X size={24} />
+            </button>
+          </div>
+
+          {/* 右侧 1/4 操作区 */}
+          <div className="w-1/4 h-full bg-gray-800 p-6 flex flex-col border-l border-gray-700">
+            <h2 className="text-xl font-bold mb-4">审阅操作</h2>
+            <div className="mb-4">
+              <span className={`px-2 py-1 rounded text-sm font-bold 
+                ${activeStoryboard.status === 'approved' ? 'bg-green-600' : 
+                  activeStoryboard.status === 'rejected' ? 'bg-red-600' : 'bg-gray-600'}`}>
+                当前状态: {
+                  activeStoryboard.status === 'pending' ? '未审阅' :
+                  activeStoryboard.status === 'approved' ? '已通过' : '未通过'
+                }
+              </span>
+            </div>
+
+            {/* 修改建议显示 */}
+            {activeStoryboard.feedback && !isRejecting && (
+               <div className="mb-6 bg-red-900/30 p-3 rounded border border-red-700">
+                 <p className="text-xs text-red-300 font-bold mb-1">修改建议:</p>
+                 <p className="text-sm">{activeStoryboard.feedback}</p>
+               </div>
+            )}
+
+            <div className="flex flex-col gap-4 mt-auto mb-10">
+              {isRejecting ? (
+                <div className="space-y-3 animate-in fade-in slide-in-from-bottom-4">
+                  <label className="text-sm font-medium">输入修改建议:</label>
+                  <textarea 
+                    className="w-full h-32 bg-gray-700 border border-gray-600 rounded p-2 text-sm focus:outline-none focus:border-blue-500"
+                    placeholder="请输入具体的修改意见..."
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                  />
+                  <div className="flex gap-2">
+                     <button 
+                      onClick={() => setIsRejecting(false)}
+                      className="flex-1 py-2 bg-gray-600 hover:bg-gray-500 rounded"
+                    >
+                      取消
+                    </button>
+                    <button 
+                      onClick={() => handleReviewAction('rejected')}
+                      className="flex-1 py-2 bg-red-600 hover:bg-red-700 rounded font-bold"
+                    >
+                      确认驳回
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <button 
+                    onClick={() => handleReviewAction('approved')}
+                    className="w-full py-4 bg-green-600 hover:bg-green-700 rounded-lg font-bold text-lg shadow-lg"
+                  >
+                    通过
+                  </button>
+                  <button 
+                    onClick={() => handleReviewAction('rejected')}
+                    className="w-full py-4 bg-red-600 hover:bg-red-700 rounded-lg font-bold text-lg shadow-lg"
+                  >
+                    不通过
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+```
+
+---
+
+### 4. 路由配置
+
+修改 **`src/App.tsx`**，引入上述三个页面。
+
+```tsx
+// 引入新页面
+import ReviewProjectsPage from './pages/review/ReviewProjectsPage';
+import ProjectDetailsPage from './pages/review/ProjectDetailsPage';
+import EpisodeDetailsPage from './pages/review/EpisodeDetailsPage';
+
+// ... 在 App 组件的 Routes 内部添加 ...
+
+<Route
+  path="/review"
+  element={
+    <RequireAuth>
+      <Layout>
+        <ReviewProjectsPage />
+      </Layout>
+    </RequireAuth>
+  }
+/>
+<Route
+  path="/review/projects/:projectId"
+  element={
+    <RequireAuth>
+      <Layout>
+        <ProjectDetailsPage />
+      </Layout>
+    </RequireAuth>
+  }
+/>
+<Route
+  path="/review/episodes/:episodeId"
+  element={
+    <RequireAuth>
+      <Layout>
+        <EpisodeDetailsPage />
+      </Layout>
+    </RequireAuth>
+  }
+/>
+
+```
+
+### 5. 功能总结
+
+1. **项目管理**：在 `/review` 页面可以创建和查看项目，卡片展示封面和集数。
+2. **单集管理**：点击项目进入 `/review/projects/:id`，管理该项目的单集。
+3. **分镜管理与排序**：点击单集进入 `/review/episodes/:id`。
+* 使用 `dnd-kit` 实现了网格布局的拖拽排序。
+* 分镜卡片根据状态显示不同颜色的边框/背景（灰、绿、红）。
+
+
+4. **全屏审阅模式**：
+* 点击分镜触发全屏遮罩。
+* 左侧 3/4 区域显示大图，支持键盘或按钮切换上一张/下一张。
+* 右侧 1/4 区域进行“通过”/“不通过”操作。
+* 点击“不通过”会平滑切换出文本框，输入建议后确认提交，状态变为红色并保存建议。

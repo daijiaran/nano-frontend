@@ -128,3 +128,33 @@ export interface ReferenceUpload {
   file?: StoredFile | null;
   originalName?: string; // 原始文件名，用于匹配上传的文件
 }
+
+// 影视审阅系统相关类型
+export interface ReviewProject {
+  id: string;
+  name: string;
+  coverFileId?: string;
+  episodeCount?: number;
+  createdAt: number;
+}
+
+export interface ReviewEpisode {
+  id: string;
+  projectId: string;
+  name: string;
+  coverFileId?: string;
+  storyboardCount?: number;
+  createdAt: number;
+}
+
+export interface ReviewStoryboard {
+  id: string;
+  episodeId: string;
+  name: string;
+  imageFileId: string;
+  imageUrl?: string; // 后端返回的完整URL或通过FileID构建
+  status: 'pending' | 'approved' | 'rejected';
+  feedback?: string;
+  sortOrder: number;
+  createdAt: number;
+}
