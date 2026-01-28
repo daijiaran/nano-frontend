@@ -39,6 +39,7 @@ function SortableStoryboardCard({ item, onClick, onEdit, canEdit, isAdmin }: { i
       style={style}
       {...attributes}
       {...listeners}
+      onClick={onClick}
       className={`relative aspect-video rounded-lg overflow-hidden border-2 cursor-pointer hover:shadow-md transition group ${statusColor}`}
     >
       <img 
@@ -94,8 +95,8 @@ export default function EpisodeDetailsPage() {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        delay: 0, // 消除激活延迟
-        tolerance: 5, // 降低拖拽触发阈值
+        // 改为基于距离触发，解决点击冲突
+        distance: 8,
       },
     })
   );
@@ -106,6 +107,8 @@ export default function EpisodeDetailsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [newImage, setNewImage] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -172,6 +175,7 @@ export default function EpisodeDetailsPage() {
       setEditingId(null);
       setNewName('');
       setNewImage(null);
+      setImagePreviewUrl(null);
       loadData();
     } catch (err: any) {
       console.error(editingId ? '更新分镜失败:' : '创建分镜失败:', err);
@@ -185,6 +189,7 @@ export default function EpisodeDetailsPage() {
     setEditingId(storyboard.id);
     setNewName(storyboard.name);
     setNewImage(null);
+    setImagePreviewUrl(null);
     setIsCreateOpen(true);
   };
 
@@ -290,7 +295,54 @@ export default function EpisodeDetailsPage() {
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">分镜图片 (必要)</label>
-            <input type="file" accept="image/*" onChange={(e) => setNewImage(e.target.files?.[0] || null)} className="w-full" />
+            <div 
+              className={`border-2 rounded p-4 text-center cursor-pointer transition-colors ${isDragOver ? 'border-blue-500 bg-blue-500/10' : 'border-gray-300 hover:border-blue-400'}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragOver(true);
+              }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragOver(false);
+                const files = e.dataTransfer.files;
+                if (files.length > 0 && files[0].type.startsWith('image/')) {
+                  setNewImage(files[0]);
+                  setImagePreviewUrl(URL.createObjectURL(files[0]));
+                }
+              }}
+            >
+              {imagePreviewUrl ? (
+                <div className="relative">
+                  <img src={imagePreviewUrl} alt="预览" className="max-w-full max-h-40 mx-auto object-contain" />
+                  <button 
+                    className="absolute top-2 right-2 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center"
+                    onClick={() => {
+                      setNewImage(null);
+                      setImagePreviewUrl(null);
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setNewImage(file);
+                        setImagePreviewUrl(URL.createObjectURL(file));
+                      }
+                    }} 
+                    className="w-full"
+                  />
+                  <p className="text-xs text-gray-500 mt-2">或拖拽图片到此处上传</p>
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex justify-end gap-2 mt-4">
             <button onClick={() => setIsCreateOpen(false)} className="px-4 py-2 text-gray-600" disabled={isCreating}>取消</button>

@@ -103,6 +103,45 @@ function AppContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // === 新增：互斥登录的心跳与自动登出逻辑 ===
+  useEffect(() => {
+    // 只有用户登录了才运行这套逻辑
+    if (!user) return;
+
+    // 1. 定时发送心跳 (每 5 分钟 = 300000 毫秒)
+    // 建议时间小于后端的 10 分钟超时时间
+    const heartbeatInterval = setInterval(() => {
+      api.sendHeartbeat();
+    }, 5 * 60 * 1000); 
+
+    // 2. 监听页面关闭/刷新事件，尝试发送登出请求
+    // 这样用户关闭网页后，后端状态能迅速变为“未登录”，方便下次立即登录
+    const handleUnload = () => {
+      const token = getAuthToken();
+      if (token) {
+        // 使用 fetch 的 keepalive: true 选项，确保请求在页面关闭后也能发出
+        // 或者使用 navigator.sendBeacon
+        const headers = new Headers();
+        headers.append('Authorization', `Bearer ${token}`);
+        headers.append('Content-Type', 'application/json');
+        
+        fetch(`${(import.meta as any).env?.VITE_API_BASE || ''}/api/auth/logout`, {
+            method: 'POST',
+            headers: headers,
+            keepalive: true // 关键：允许请求在页面卸载后继续存活
+        });
+      }
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+
+    // 清理函数
+    return () => {
+      clearInterval(heartbeatInterval);
+      window.removeEventListener('beforeunload', handleUnload);
+    };
+  }, [user]); // 依赖项为 user，当 user 变化时重新设置
+
   // 监听路径变化，自动切换Tab
   useEffect(() => {
     if (location.pathname.startsWith('/review')) {
@@ -119,7 +158,15 @@ function AppContent() {
       setModels(m || []);
       setTab('image');
     } catch (e: any) {
-      setLoginError(e?.message || String(e));
+      let errorMessage = e?.message || String(e);
+      
+      // === 修改：针对互斥登录的错误处理 ===
+      // 特别针对"互斥登录"的提示优化
+      if (errorMessage.includes("已在其他设备登录")) {
+         errorMessage = "该账号当前在线。请先在其他设备退出，或等待 10 分钟自动清理。";
+      }
+      
+      setLoginError(errorMessage);
       throw e;
     }
   }

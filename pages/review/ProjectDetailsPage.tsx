@@ -54,7 +54,7 @@ function SortableEpisodeCard({
       style={style}
       {...attributes}
       {...listeners}
-      className="bg-gray-800 rounded-xl shadow hover:shadow-lg transition cursor-pointer overflow-hidden border border-gray-700 relative touch-none"
+      className="bg-[#18181d] rounded-xl shadow hover:shadow-lg transition cursor-pointer overflow-hidden border border-gray-700 relative touch-none"
     >
       <div onClick={onClick}>
         <div className="h-32 bg-gray-700 flex items-center justify-center">
@@ -96,8 +96,8 @@ export default function ProjectDetailsPage() {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        delay: 0, // 消除激活延迟
-        tolerance: 5, // 降低拖拽触发阈值
+        // 改为基于距离触发，解决点击冲突
+        distance: 8,
       },
     })
   );

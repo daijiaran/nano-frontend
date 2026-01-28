@@ -133,6 +133,22 @@ export const api = {
     return apiFetch<User>('/api/auth/me');
   },
 
+  // === 新增：发送心跳 ===
+  async sendHeartbeat(): Promise<void> {
+    const token = getAuthToken();
+    if (!token) return;
+
+    // 注意：这里不需要抛出严重错误干扰UI，失败了通常意味着网络问题或token过期
+    try {
+      await apiFetch('/api/auth/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (error) {
+      console.warn('Heartbeat failed:', error);
+    }
+  },
+
   // ---------- models ----------
   async getModels(): Promise<ModelInfo[]> {
     return apiFetch<ModelInfo[]>('/api/models');

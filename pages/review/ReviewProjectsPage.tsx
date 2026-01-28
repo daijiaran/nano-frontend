@@ -93,7 +93,7 @@ export default function ReviewProjectsPage() {
         {projects.map((p) => (
           <div
             key={p.id}
-            className="bg-gray-800 rounded-xl shadow hover:shadow-lg transition cursor-pointer overflow-hidden border border-gray-700 relative"
+            className="bg-[#18181d] rounded-xl shadow hover:shadow-lg transition cursor-pointer overflow-hidden border border-gray-700 relative"
           >
             <div onClick={() => navigate(`/review/projects/${p.id}`)}>
               <div className="h-40 bg-gray-700 flex items-center justify-center">
