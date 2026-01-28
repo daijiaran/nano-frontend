@@ -67,7 +67,7 @@ export default function ReviewProjectsPage() {
   };
 
   return (
-    <div className="container mx-auto p-6 bg-[#09090b] min-h-screen">
+    <div className="container mx-auto p-6 bg-[#09090b] min-h-full">
       {error && (
         <div className="mb-4 p-4 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm">
           {error}

@@ -266,7 +266,7 @@ function AppContent() {
   return (
     <ErrorBoundary>
       <div className="flex h-full w-full min-h-0 flex-col overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-white/5 px-6 py-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="relative z-[100] flex flex-col gap-3 border-b border-white/5 bg-[#09090b] px-6 py-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-3">
             <TabButton active={tab === 'image'} onClick={() => handleTabChange('image')}>
               图片生成
@@ -322,7 +322,7 @@ function AppContent() {
           </div>
         </div>
 
-        <div className="min-h-0 flex-1">{page}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">{page}</div>
 
         <ProviderSettingsModal open={providerOpen} onClose={() => setProviderOpen(false)} />
 

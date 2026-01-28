@@ -127,32 +127,10 @@ export default function App() {
   };
 
   return (
-    <div className="h-full w-full overflow-hidden bg-[#050505] text-[#e5e5e5] font-sans selection:bg-amber-900 selection:text-amber-100">
+    <div className="h-full w-full bg-[#050505] text-[#e5e5e5] font-sans selection:bg-amber-900 selection:text-amber-100 flex flex-col">
       
-      {/* 顶部导航栏 - 金属拉丝质感模拟 */}
-      <header className="flex-shrink-0 border-b border-neutral-800 bg-[#0a0a0a] px-6 py-4 flex items-center justify-between sticky top-0 z-50 shadow-2xl shadow-black/50">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded bg-gradient-to-br from-neutral-700 to-black border border-neutral-600 flex items-center justify-center shadow-inner">
-            <Camera size={16} className="text-amber-500" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold tracking-wider text-neutral-200 uppercase" style={{ fontFamily: 'Arial, sans-serif' }}>
-              Nano-Banana <span className="text-amber-600">Pro</span>
-            </h1>
-            <div className="text-[10px] text-neutral-500 tracking-[0.2em] uppercase">智能影像工作室</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-4 text-xs font-mono text-neutral-500">
-          <span className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-900 border border-green-600 animate-pulse"></span>
-            内核加载完成
-          </span>
-          <span className="px-2 py-1 border border-neutral-800 rounded bg-[#0f0f0f]">V 2.5.11</span>
-        </div>
-      </header>
-
       {/* 主内容区 */}
-      <main className="flex-1 min-h-0 overflow-auto p-4 lg:p-8">
+      <main className="flex-1 min-h-0 overflow-auto p-4 lg:p-8 custom-scrollbar">
         <div className="container mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
         
         {/* 左侧控制区 (5/12) */}
