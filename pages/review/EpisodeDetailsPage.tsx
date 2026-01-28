@@ -1,17 +1,31 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Plus, ArrowLeft, Image as ImageIcon, ChevronLeft, ChevronRight, X, Edit } from 'lucide-react';
+import { Plus, ArrowLeft, Image as ImageIcon, ChevronLeft, ChevronRight, X, Edit, Download, CheckSquare, Square } from 'lucide-react';
 import { DndContext, closestCenter, DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy, rectSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
+
 import { getStoryboards, createStoryboard, reorderStoryboards, updateStoryboardStatus, updateStoryboard } from '../../services/reviewService';
 import { ReviewStoryboard, User } from '../../types';
 import { Modal } from '../../components/Modal';
-import { api, buildFileUrl } from '../../services/api';
+import { api, buildFileUrl, getAuthToken } from '../../services/api';
 
 // --- 可拖拽的分镜卡片组件 ---
-function SortableStoryboardCard({ item, onClick, onEdit, canEdit, isAdmin }: { item: ReviewStoryboard; onClick: () => void; onEdit: () => void; canEdit: boolean; isAdmin: boolean }) {
+interface SortableStoryboardCardProps {
+  item: ReviewStoryboard;
+  onClick: () => void;
+  onEdit: () => void;
+  canEdit: boolean;
+  isAdmin: boolean;
+  isBatchMode: boolean;
+  isSelected: boolean;
+  toggleSelection: (id: string) => void;
+}
+
+function SortableStoryboardCard({ item, onClick, onEdit, canEdit, isAdmin, isBatchMode, isSelected, toggleSelection }: SortableStoryboardCardProps) {
   const {
     attributes,
     listeners,
@@ -33,20 +47,42 @@ function SortableStoryboardCard({ item, onClick, onEdit, canEdit, isAdmin }: { i
   if (item.status === 'approved') statusColor = "bg-green-900/40 border-green-600 ring-1 ring-green-500";
   if (item.status === 'rejected') statusColor = "bg-red-900/40 border-red-600 ring-1 ring-red-500";
 
+  // 批量模式下的样式
+  if (isBatchMode && isSelected) {
+    statusColor = "border-blue-500 ring-2 ring-blue-500/50 shadow-lg scale-[1.02]";
+  }
+
   return (
     <div
       ref={setNodeRef}
       style={style}
       {...attributes}
       {...listeners}
-      onClick={onClick}
+      onClick={isBatchMode ? () => toggleSelection(item.id) : onClick}
       className={`relative aspect-video rounded-lg overflow-hidden border-2 cursor-pointer hover:shadow-md transition group ${statusColor}`}
     >
       <img 
         src={item.imageUrl || buildFileUrl(item.imageFileId)} 
         alt="storyboard" 
-        className="w-full h-full object-cover" 
+        className={`w-full h-full object-cover transition duration-300 ${isBatchMode && isSelected ? 'opacity-75' : ''}`} 
       />
+      {/* 批量选择勾选框 */}
+      {isBatchMode && (
+        <div className="absolute top-2 left-2 z-20" onClick={(e) => e.stopPropagation()}>
+          <div 
+            onClick={() => toggleSelection(item.id)}
+            className={`
+                w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all
+                ${isSelected 
+                    ? 'bg-blue-500 border-blue-500 text-white' 
+                    : 'bg-black/40 border-gray-300 text-transparent hover:bg-black/60'
+                }
+            `}
+          >
+              <CheckSquare size={16} fill="currentColor" className={isSelected ? 'block' : 'hidden'} />
+          </div>
+        </div>
+      )}
       <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-xs p-1 opacity-0 group-hover:opacity-100 transition">
         {isAdmin ? '点击审阅' : '点击查看'}
       </div>
@@ -90,6 +126,11 @@ export default function EpisodeDetailsPage() {
   const navigate = useNavigate();
   const [storyboards, setStoryboards] = useState<ReviewStoryboard[]>([]);
   const [user, setUser] = useState<User | null>(null);
+  
+  // --- 批量下载相关状态 ---
+  const [isBatchMode, setIsBatchMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isDownloading, setIsDownloading] = useState(false);
   
   // --- 新增传感器配置 --- 
   const sensors = useSensors(
@@ -138,6 +179,169 @@ export default function EpisodeDetailsPage() {
         console.error('加载分镜失败:', err);
         setError(err.message);
       });
+    }
+  };
+
+  // --- 批量下载功能函数 ---
+  const toggleBatchMode = () => {
+    if (isBatchMode) {
+      setSelectedIds(new Set());
+    }
+    setIsBatchMode(!isBatchMode);
+  };
+
+  const toggleSelection = (id: string) => {
+    const newSelected = new Set(selectedIds);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === storyboards.length) {
+      setSelectedIds(new Set());
+    } else {
+      const allIds = new Set(storyboards.map(s => s.id));
+      setSelectedIds(allIds);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (selectedIds.size === 0) return;
+    
+    setIsDownloading(true);
+    const zip = new JSZip();
+    const folder = zip.folder("storyboards");
+
+    try {
+      const promises = Array.from(selectedIds).map(async (id) => {
+        const item = storyboards.find(s => s.id === id);
+        if (!item) {
+          console.warn(`分镜 ${id} 未找到，跳过下载`);
+          return { success: false, id, error: '分镜未找到' };
+        }
+
+        // 1. 关键修复：确保 fileUrl 不为 undefined
+        // 优先使用 item.imageUrl，如果没有则使用 buildFileUrl 构建
+        // 注意：这里我们不使用 ?download=1，因为我们需要二进制流而不是触发浏览器下载行为
+        if (!item.imageUrl && !item.imageFileId) {
+          console.warn(`分镜 ${id} (名称: ${item.name}) 缺少图片URL或文件ID，跳过下载`);
+          return { success: false, id, error: '缺少图片URL或文件ID' };
+        }
+
+        // 2. 关键修复：使用相对路径避免 CORS 问题
+        // 如果 item.imageUrl 是绝对 URL，转换为相对路径
+        let fileUrl = item.imageUrl || buildFileUrl(item.imageFileId);
+        
+        // 如果 URL 包含完整域名，提取相对路径部分
+        if (fileUrl.includes('://')) {
+          try {
+            const urlObj = new URL(fileUrl);
+            fileUrl = urlObj.pathname + urlObj.search;
+            console.log(`转换绝对URL为相对路径: ${fileUrl}`);
+          } catch (e) {
+            console.warn(`URL 解析失败: ${fileUrl}`, e);
+          }
+        }
+        
+        console.log(`开始下载分镜 ${id}，URL: ${fileUrl}`);
+
+        try {
+          // 使用 fetch API 获取图片二进制数据，通过 Vite proxy 避免 CORS 问题
+          const token = getAuthToken();
+          const headers: HeadersInit = {};
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+          }
+
+          console.log(`正在 fetch 分镜 ${id} 的图片数据...`);
+          const response = await fetch(fileUrl, { headers });
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          const blob = await response.blob();
+          console.log(`分镜 ${id} 获取图片数据成功，大小: ${blob.size} bytes, 类型: ${blob.type}`);
+
+          // 如果不是 PNG 格式，需要转换
+          let finalBlob = blob;
+          if (blob.type !== 'image/png') {
+            console.log(`分镜 ${id} 图片类型为 ${blob.type}，需要转换为 PNG`);
+            const img = new Image();
+            await new Promise((resolve, reject) => {
+              img.onload = resolve;
+              img.onerror = reject;
+              img.src = URL.createObjectURL(blob);
+            });
+
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              throw new Error('Failed to get canvas context');
+            }
+            ctx.drawImage(img, 0, 0);
+
+            finalBlob = await new Promise<Blob>((resolve, reject) => {
+              canvas.toBlob((result) => {
+                if (result) {
+                  console.log(`分镜 ${id} 转换为 PNG 成功，大小: ${result.size} bytes`);
+                  resolve(result);
+                } else {
+                  reject(new Error('Canvas toBlob 返回 null'));
+                }
+              }, 'image/png');
+            });
+            URL.revokeObjectURL(img.src);
+          }
+          
+          // 构建文件名 (按照分镜在列表中的顺序命名)
+          const index = storyboards.findIndex(s => s.id === id);
+          const fileName = `分镜-${index + 1}.png`; 
+          
+          if (folder) {
+              folder.file(fileName, finalBlob);
+              console.log(`分镜 ${id} 已添加到压缩包: ${fileName}`);
+          }
+          return { success: true, id };
+        } catch (error) {
+          console.error(`分镜 ${id} 下载失败:`, error);
+          return { success: false, id, error: error instanceof Error ? error.message : String(error) };
+        }
+      });
+
+      const results = await Promise.all(promises);
+      
+      const successCount = results.filter(r => r.success).length;
+      const failCount = results.filter(r => !r.success).length;
+      
+      console.log(`下载完成: 成功 ${successCount} 个，失败 ${failCount} 个`);
+      
+      if (failCount > 0) {
+        const failedIds = results.filter(r => !r.success).map(r => r.id);
+        console.warn('失败的分镜ID:', failedIds);
+        console.warn('失败详情:', results.filter(r => !r.success));
+      }
+
+      const content = await zip.generateAsync({ type: "blob" });
+      console.log(`压缩包生成成功，大小: ${content.size} bytes`);
+      saveAs(content, `分镜批量下载_${new Date().toISOString().slice(0, 10)}.zip`);
+      
+      if (failCount > 0) {
+        alert(`下载完成！成功 ${successCount} 个，失败 ${failCount} 个。请查看控制台了解详情。`);
+      }
+    } catch (error) {
+      console.error("下载失败:", error);
+      console.error("错误详情:", error instanceof Error ? error.message : error);
+      console.error("错误堆栈:", error instanceof Error ? error.stack : error);
+      alert("下载失败，请检查网络或控制台日志。");
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -246,13 +450,53 @@ export default function EpisodeDetailsPage() {
       </button>
 
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-white">分镜列表 (可拖拽排序)</h1>
-        <button
-          onClick={() => setIsCreateOpen(true)}
-          className="bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-600"
-        >
-          <Plus size={20} /> 新建分镜
-        </button>
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-bold text-white">分镜列表 (可拖拽排序)</h1>
+          {isBatchMode && (
+            <span className="text-gray-400 text-sm">
+              已选择 {selectedIds.size} / {storyboards.length} 项
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3">
+          {/* 批量操作按钮组 */}
+          {isBatchMode ? (
+            <>
+              <button 
+                onClick={toggleSelectAll}
+                className="bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-600 transition-colors"
+              >
+                {selectedIds.size === storyboards.length ? (
+                   <><CheckSquare size={18} /> 取消全选</>
+                ) : (
+                   <><Square size={18} /> 全选</>
+                )}
+              </button>
+              <button 
+                onClick={toggleBatchMode}
+                className="bg-red-900/50 text-red-200 border border-red-800 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-red-900/80 transition-colors"
+              >
+                <X size={18} /> 退出批量
+              </button>
+            </>
+          ) : (
+            <button 
+              onClick={toggleBatchMode}
+              className="bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-600 transition-colors"
+            >
+              <CheckSquare size={18} /> 批量下载
+            </button>
+          )}
+
+          {/* 原有的新建按钮 */}
+          <button
+            onClick={() => setIsCreateOpen(true)}
+            className="bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-600"
+          >
+            <Plus size={20} /> 新建分镜
+          </button>
+        </div>
       </div>
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -266,6 +510,7 @@ export default function EpisodeDetailsPage() {
             {storyboards.map((item) => {
               const isAdmin = user?.role === 'admin';
               const canEdit = user && (user.id === item.userId || user.role === 'admin');
+              const isSelected = selectedIds.has(item.id);
               return (
                 <SortableStoryboardCard 
                   key={item.id} 
@@ -274,6 +519,9 @@ export default function EpisodeDetailsPage() {
                   onEdit={() => handleEdit(item)} 
                   canEdit={canEdit} 
                   isAdmin={isAdmin} 
+                  isBatchMode={isBatchMode}
+                  isSelected={isSelected}
+                  toggleSelection={toggleSelection}
                 />
               );
             })}
@@ -352,6 +600,35 @@ export default function EpisodeDetailsPage() {
           </div>
         </div>
       </Modal>
+
+      {/* 悬浮下载按钮 */}
+      {isBatchMode && selectedIds.size > 0 && (
+        <div className="fixed bottom-8 right-8 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <button
+            onClick={handleDownload}
+            disabled={isDownloading}
+            className={`
+                flex items-center gap-3 px-6 py-3 rounded-full shadow-2xl font-bold text-lg transition-all transform hover:scale-105 active:scale-95
+                ${isDownloading 
+                    ? 'bg-gray-600 cursor-not-allowed text-gray-300' 
+                    : 'bg-blue-600 hover:bg-blue-500 text-white'
+                }
+            `}
+          >
+            {isDownloading ? (
+                <>
+                    <div className="animate-spin">⟳</div>
+                    打包中...
+                </>
+            ) : (
+                <>
+                    <Download />
+                    下载已选 ({selectedIds.size})
+                </>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* 审阅全屏 Modal */}
       {reviewingId && activeStoryboard && (

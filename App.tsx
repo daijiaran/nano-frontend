@@ -8,6 +8,7 @@ import { SlicerPage } from './pages/SlicerPage';
 import { VideoPage } from './pages/VideoPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { AdminPage } from './pages/AdminPage';
+import NanoBanana3DStudio from './pages/NanoBanana3DStudio';
 import ReviewProjectsPage from './pages/review/ReviewProjectsPage';
 import ProjectDetailsPage from './pages/review/ProjectDetailsPage';
 import EpisodeDetailsPage from './pages/review/EpisodeDetailsPage';
@@ -15,7 +16,7 @@ import { ProviderSettingsModal } from './components/ProviderSettingsModal';
 import { Spinner } from './components/Spinner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
-type Tab = 'image' | 'slicer' | 'video' | 'library' | 'admin' | 'review';
+type Tab = 'image' | 'slicer' | 'video' | 'library' | 'admin' | 'review' | 'studio';
 
 function TabButton(props: {
   active: boolean;
@@ -230,6 +231,9 @@ function AppContent() {
     if (tab === 'library') {
       return <LibraryPage />;
     }
+    if (tab === 'studio') {
+      return <NanoBanana3DStudio />;
+    }
     if (tab === 'review') {
       return (
         <Routes>
@@ -275,6 +279,9 @@ function AppContent() {
             </TabButton>
             <TabButton active={tab === 'library'} onClick={() => handleTabChange('library')}>
               角色/场景库
+            </TabButton>
+            <TabButton active={tab === 'studio'} onClick={() => handleTabChange('studio')}>
+              多角度工作室
             </TabButton>
             <TabButton active={tab === 'review'} onClick={() => handleTabChange('review')}>
               影视审阅

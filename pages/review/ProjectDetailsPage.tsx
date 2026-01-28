@@ -20,17 +20,19 @@ import { Modal } from '../../components/Modal';
 import { api, buildFileUrl } from '../../services/api';
 
 // --- 新增可拖拽单集卡片组件 ---
+interface SortableEpisodeCardProps {
+  episode: ReviewEpisode;
+  onClick: () => void;
+  onEdit: () => void;
+  canEdit: boolean;
+}
+
 function SortableEpisodeCard({ 
   episode, 
   onClick, 
   onEdit, 
   canEdit 
-}: { 
-  episode: ReviewEpisode; 
-  onClick: () => void; 
-  onEdit: () => void; 
-  canEdit: boolean 
-}) {
+}: SortableEpisodeCardProps) {
   const {
     attributes,
     listeners,
