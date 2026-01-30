@@ -1,62 +1,21 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Upload, Image as ImageIcon, Download, Loader2, RefreshCw, Settings2, Camera, ChevronDown, ChevronUp, Aperture, Maximize, Move3d } from 'lucide-react';
+import { Upload, Download, RefreshCw, Settings2, Move3d, ChevronDown, ChevronUp, Aperture, Maximize } from 'lucide-react';
+import { api, buildFileUrl } from '../services/api';
+import type { ModelInfo, Generation } from '../types';
 
-/**
- * ============================================================================
- * 模拟 API 服务
- * ============================================================================
- */
-
-interface Generation {
-  id: string;
-  status: 'queued' | 'running' | 'succeeded' | 'failed';
-  outputFile?: { url: string };
-  prompt: string;
-}
-
-const mockApi = {
-  login: async () => {
-    return { token: 'mock-token-123' };
-  },
-  generateImages: async (payload: any): Promise<{ created: Generation[] }> => {
-    console.log('[API 调用] generateImages 参数:', payload);
-    await new Promise(resolve => setTimeout(resolve, 2500)); // 稍长的延迟模拟沉重计算感
-    return {
-      created: [
-        {
-          id: `gen-${Date.now()}`,
-          status: 'succeeded',
-          prompt: payload.prompt,
-          outputFile: {
-            url: `https://picsum.photos/seed/${Date.now()}/1024/768` 
-          }
-        }
-      ]
-    };
-  }
-};
-
-/**
- * ============================================================================
- * 提示词转换逻辑
- * ============================================================================
- */
 const getCameraPrompts = (azimuth: number, elevation: number, distance: number) => {
   const parts = [];
 
-  // 1. 方位角
   if (azimuth >= 315 || azimuth <= 45) parts.push('front view');
   else if (azimuth > 45 && azimuth < 135) parts.push('right side view, profile shot');
   else if (azimuth >= 135 && azimuth <= 225) parts.push('back view, from behind');
   else if (azimuth > 225 && azimuth < 315) parts.push('left side view, profile shot');
 
-  // 2. 俯仰角
   if (elevation > 45) parts.push('top down view, bird\'s eye view');
   else if (elevation > 15) parts.push('high angle shot, looking down');
   else if (elevation < -15) parts.push('low angle shot, looking up, worm\'s eye view');
   else parts.push('eye-level shot');
 
-  // 3. 距离
   if (distance < 0.8) parts.push('close-up shot, macro details');
   else if (distance > 1.2) parts.push('wide shot, long shot, full body');
   else parts.push('medium shot, upper body');
@@ -64,38 +23,48 @@ const getCameraPrompts = (azimuth: number, elevation: number, distance: number) 
   return `<sks> ${parts.join(', ')}`;
 };
 
-/**
- * ============================================================================
- * 主应用组件
- * ============================================================================
- */
-export default function App() {
-  // --- State ---
+export default function NanoBanana3DStudio() {
   const [inputImage, setInputImage] = useState<File | null>(null);
   const [inputImagePreview, setInputImagePreview] = useState<string | null>(null);
   
   const [prompt, setPrompt] = useState('一位身穿机能风外套的赛博朋克角色，站在雨夜的霓虹街道中');
+  
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-  
-  // Camera Controls
+  const [currentGenId, setCurrentGenId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   const [azimuth, setAzimuth] = useState(45);   
   const [elevation, setElevation] = useState(20); 
   const [distance, setDistance] = useState(1.0);  
 
-  // Settings
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelId, setModelId] = useState<string>('');
+  
   const [seed, setSeed] = useState(0);
   const [randomizeSeed, setRandomizeSeed] = useState(true);
   const [guidanceScale, setGuidanceScale] = useState(7.5);
+  
   const [imageSize, setImageSize] = useState('2K');
   const [aspectRatio, setAspectRatio] = useState('16:9');
+  
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  // Computed Prompt
   const cameraPrompt = useMemo(() => getCameraPrompts(azimuth, elevation, distance), [azimuth, elevation, distance]);
   const finalPrompt = `${prompt}, ${cameraPrompt}`;
 
-  // --- Handlers ---
+  useEffect(() => {
+    api.getModels().then(res => {
+      const imageModels = res.filter(m => m.type === 'image');
+      setModels(imageModels);
+      const defaultModel = imageModels.find(m => m.id === 'nano-banana-pro') || imageModels[0];
+      if (defaultModel) setModelId(defaultModel.id);
+    }).catch(err => {
+      console.error("Failed to load models:", err);
+      setErrorMsg("模型列表加载失败");
+    });
+  }, []);
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
@@ -105,40 +74,98 @@ export default function App() {
   };
 
   const handleGenerate = async () => {
+    if (!modelId) {
+        alert("请先选择一个模型");
+        return;
+    }
     setIsGenerating(true);
+    setGeneratedImage(null);
+    setErrorMsg(null);
+    setCurrentGenId(null);
+
     try {
+      const orderedReferences = inputImage ? [{ file: inputImage }] : [];
+
       const payload = {
         prompt: finalPrompt,
-        model: 'nano-banana-pro',
+        model: modelId,
         imageSize: imageSize,
         aspectRatio: aspectRatio,
         batch: 1,
-        orderedReferences: inputImage ? [{ file: inputImage }] : [],
+        orderedReferences: orderedReferences,
       };
-      const result = await mockApi.generateImages(payload);
+
+      const result = await api.generateImages(payload);
+      
       if (result.created && result.created.length > 0) {
-        setGeneratedImage(result.created[0].outputFile?.url || null);
+        const gen = result.created[0];
+        if (gen.status === 'queued' || gen.status === 'running') {
+            setCurrentGenId(gen.id);
+        } else if (gen.status === 'succeeded' && gen.outputFile) {
+            setGeneratedImage(gen.outputFile.url);
+            setIsGenerating(false);
+        } else if (gen.status === 'failed') {
+            setErrorMsg(gen.failureReason || "生成失败");
+            setIsGenerating(false);
+        }
       }
-    } catch (error) {
-      console.error("生成失败:", error);
-    } finally {
+    } catch (error: any) {
+      console.error("生成请求失败:", error);
+      setErrorMsg(error.message || "请求失败");
       setIsGenerating(false);
     }
+  };
+
+  useEffect(() => {
+    if (!currentGenId) return;
+
+    const intervalId = setInterval(async () => {
+        try {
+            const gen = await api.getGeneration(currentGenId);
+            
+            if (gen.status === 'succeeded') {
+                clearInterval(intervalId);
+                setCurrentGenId(null);
+                setIsGenerating(false);
+                if (gen.outputFile) {
+                    const url = buildFileUrl(gen.outputFile.id);
+                    setGeneratedImage(url);
+                }
+            } else if (gen.status === 'failed') {
+                clearInterval(intervalId);
+                setCurrentGenId(null);
+                setIsGenerating(false);
+                setErrorMsg(gen.failureReason || "生成任务失败");
+            }
+        } catch (e) {
+            console.error("Polling error", e);
+        }
+    }, 2000);
+
+    return () => clearInterval(intervalId);
+  }, [currentGenId]);
+
+  const handleDownload = () => {
+      if (generatedImage) {
+          const a = document.createElement('a');
+          a.href = generatedImage;
+          a.download = `nano-3d-${Date.now()}.png`;
+          a.target = '_blank'; 
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+      }
   };
 
   return (
     <div className="h-full w-full bg-[#050505] text-[#e5e5e5] font-sans selection:bg-amber-900 selection:text-amber-100 flex flex-col">
       
-      {/* 主内容区 */}
       <main className="flex-1 min-h-0 overflow-auto p-4 lg:p-8 custom-scrollbar">
         <div className="container mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
         
-        {/* 左侧控制区 (5/12) */}
         <div className="lg:col-span-5 flex flex-col gap-6">
           
-          {/* 3D 视窗 (核心功能) */}
           <div className="bg-[#0f0f0f] border border-neutral-800 rounded-sm relative shadow-lg group">
-             {/* 装饰性边角 */}
              <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-amber-600/50"></div>
              <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-amber-600/50"></div>
              <div className="absolute bottom-0 left-0 w-2 h-2 border-b border-l border-amber-600/50"></div>
@@ -155,7 +182,6 @@ export default function App() {
 
                 <Visualizer3D azimuth={azimuth} elevation={elevation} distance={distance} imagePreview={inputImagePreview} />
 
-                {/* 动态提示词浮层 */}
                 <div className="absolute bottom-0 left-0 right-0 bg-black/80 border-t border-neutral-800 backdrop-blur-sm p-3">
                    <div className="text-[10px] text-amber-600/70 mb-1 font-mono uppercase">系统生成的空间控制指令:</div>
                    <code className="text-xs text-neutral-400 font-mono block whitespace-nowrap overflow-hidden text-ellipsis">
@@ -165,14 +191,12 @@ export default function App() {
              </div>
           </div>
 
-          {/* 参数控制台 */}
           <div className="bg-[#0f0f0f] border border-neutral-800 p-6 shadow-lg relative">
              <div className="flex items-center gap-2 mb-6 border-b border-neutral-800 pb-3">
                 <Settings2 size={16} className="text-neutral-400" />
                 <h3 className="text-sm font-bold text-neutral-200 tracking-wider uppercase">镜头参数配置</h3>
              </div>
 
-             {/* 滑块样式自定义 */}
              <style>{`
                input[type=range] {
                  -webkit-appearance: none; 
@@ -196,7 +220,6 @@ export default function App() {
              `}</style>
 
              <div className="space-y-8">
-               {/* 方位角 */}
                <div className="space-y-2">
                  <div className="flex justify-between text-xs">
                    <span className="text-neutral-400">方位角 (水平旋转)</span>
@@ -208,7 +231,6 @@ export default function App() {
                  </div>
                </div>
 
-               {/* 俯仰角 */}
                <div className="space-y-2">
                  <div className="flex justify-between text-xs">
                    <span className="text-neutral-400">俯仰角 (垂直视角)</span>
@@ -217,7 +239,6 @@ export default function App() {
                  <input type="range" min="-90" max="90" value={elevation} onChange={(e) => setElevation(parseInt(e.target.value))} className="w-full" />
                </div>
 
-               {/* 距离 */}
                <div className="space-y-2">
                  <div className="flex justify-between text-xs">
                    <span className="text-neutral-400">焦距/距离 (缩放)</span>
@@ -228,7 +249,6 @@ export default function App() {
              </div>
           </div>
 
-          {/* 参考图上传 */}
           <div className="bg-[#0f0f0f] border border-neutral-800 p-1 relative h-24 flex items-center">
              {inputImagePreview ? (
                <div className="w-full h-full relative flex items-center bg-[#050505] px-4 gap-4">
@@ -254,10 +274,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* 右侧输出区 (7/12) */}
         <div className="lg:col-span-7 flex flex-col gap-6">
           
-          {/* 生成结果展示 */}
           <div className="flex-1 bg-[#0f0f0f] border border-neutral-800 min-h-[500px] relative flex flex-col">
             <div className="absolute top-0 left-0 right-0 h-8 flex items-center px-4 border-b border-neutral-800 bg-[#141414] justify-between">
                 <div className="flex items-center gap-2 text-xs font-bold text-neutral-400 uppercase tracking-widest">
@@ -271,18 +289,20 @@ export default function App() {
             </div>
 
             <div className="flex-1 flex items-center justify-center bg-[#050505] p-6 relative overflow-hidden">
-              {/* 背景网格装饰 */}
               <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'linear-gradient(#222 1px, transparent 1px), linear-gradient(90deg, #222 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
 
               {generatedImage ? (
-                <div className="relative z-10 shadow-2xl shadow-black">
+                <div className="relative z-10 shadow-2xl shadow-black group">
                   <img 
                     src={generatedImage} 
                     alt="Generated" 
                     className="max-w-full max-h-[600px] border border-neutral-800" 
                   />
                   <div className="absolute -bottom-10 right-0 flex gap-2">
-                    <button className="flex items-center gap-2 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs border border-neutral-700 transition-colors">
+                    <button 
+                        onClick={handleDownload}
+                        className="flex items-center gap-2 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs border border-neutral-700 transition-colors"
+                    >
                         <Download size={14} /> 保存图像
                     </button>
                   </div>
@@ -293,7 +313,14 @@ export default function App() {
                     <div className="flex flex-col items-center">
                       <div className="w-16 h-16 border-2 border-neutral-800 border-t-amber-600 rounded-full animate-spin mb-4"></div>
                       <span className="text-amber-600 text-xs tracking-widest uppercase font-bold">渲染引擎计算中...</span>
-                      <span className="text-[10px] text-neutral-500 mt-2 font-mono">Processing Tensor Cores</span>
+                      <span className="text-[10px] text-neutral-500 mt-2 font-mono">
+                        {currentGenId ? `任务ID: ${currentGenId.slice(0,8)}...` : 'Initializing...'}
+                      </span>
+                    </div>
+                  ) : errorMsg ? (
+                    <div className="flex flex-col items-center text-red-900">
+                        <Maximize size={48} className="text-red-900/50 mb-4 stroke-1" />
+                        <p className="text-xs tracking-widest uppercase text-red-500">{errorMsg}</p>
                     </div>
                   ) : (
                     <>
@@ -306,7 +333,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* 底部输入栏 */}
           <div className="bg-[#0f0f0f] border border-neutral-800 p-6">
              <div className="flex justify-between items-end mb-3">
                  <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">提示词指令 (Prompt)</label>
@@ -319,6 +345,7 @@ export default function App() {
                  </button>
              </div>
              
+
              <div className="relative">
                 <textarea 
                   value={prompt}
@@ -331,9 +358,22 @@ export default function App() {
                 </div>
              </div>
 
-             {/* 高级设置面板 */}
              {showAdvanced && (
                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-neutral-800 animate-in fade-in slide-in-from-top-1">
+                 <div className="space-y-1">
+                   <label className="text-[10px] text-neutral-500 uppercase">模型</label>
+                   <select 
+                     value={modelId} 
+                     onChange={(e) => setModelId(e.target.value)}
+                     className="w-full bg-[#050505] border border-neutral-800 text-xs px-2 py-1 text-neutral-400 focus:border-amber-900 outline-none"
+                   >
+                     {models.map((m) => (
+                       <option key={m.id} value={m.id}>
+                         {m.name}
+                       </option>
+                     ))}
+                   </select>
+                 </div>
                  <div className="space-y-1">
                    <label className="text-[10px] text-neutral-500 uppercase">随机种子 (Seed)</label>
                    <div className="flex">
@@ -352,8 +392,10 @@ export default function App() {
                    <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} className="w-full bg-[#050505] border border-neutral-800 text-xs px-2 py-1 text-neutral-400 focus:border-amber-900 outline-none">
                      <option value="auto">Auto (自动)</option>
                      <option value="1:1">1:1 (正方形)</option>
-                     <option value="16:9">16:9 (横向)</option>
+                     <option value="3:4">3:4 (竖向)</option>
+                     <option value="4:3">4:3 (横向)</option>
                      <option value="9:16">9:16 (竖向)</option>
+                     <option value="16:9">16:9 (横向)</option>
                    </select>
                  </div>
                  <div className="space-y-1">
@@ -387,11 +429,6 @@ export default function App() {
   );
 }
 
-/**
- * ============================================================================
- * 3D 可视化组件 (Canvas) - 黑色金属风格重绘
- * ============================================================================
- */
 function Visualizer3D({ azimuth, elevation, distance, imagePreview }: { azimuth: number, elevation: number, distance: number, imagePreview: string | null }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null);
@@ -419,28 +456,23 @@ function Visualizer3D({ azimuth, elevation, distance, imagePreview }: { azimuth:
 
     ctx.clearRect(0, 0, width, height);
     
-    // Math
     const azRad = (azimuth - 90) * (Math.PI / 180);
     const elRad = elevation * (Math.PI / 180);
     
-    // 1. 绘制地板网格 (极简暗色风格)
     ctx.save();
     ctx.translate(centerX, centerY + 30);
     ctx.scale(1, 0.4); 
     
-    // 轨道圈 - 暗灰金属色
     ctx.beginPath();
-    ctx.strokeStyle = '#404040'; // Neutral-700
+    ctx.strokeStyle = '#404040';
     ctx.lineWidth = 2;
-    // 去掉发光，使用硬朗线条
     ctx.shadowBlur = 0;
     
     const baseRadius = 90;
     ctx.arc(0, 0, baseRadius, 0, Math.PI * 2);
     ctx.stroke();
     
-    // 内部网格 - 几乎不可见的深色
-    ctx.strokeStyle = '#262626'; // Neutral-800
+    ctx.strokeStyle = '#262626';
     ctx.lineWidth = 1;
     ctx.beginPath();
     for(let i = -180; i <= 180; i+=30) {
@@ -450,24 +482,20 @@ function Visualizer3D({ azimuth, elevation, distance, imagePreview }: { azimuth:
     ctx.stroke();
     ctx.restore();
 
-    // 2. 绘制目标主体 (中心立牌)
     ctx.save();
     ctx.translate(centerX, centerY);
-    // 切变变换模拟 3D 侧视
     ctx.transform(0.9, 0.25, 0, 1, 0, 0); 
 
     const boxW = 80;
     const boxH = 80;
     const thickness = 8; 
 
-    // 倒影 - 非常微弱
     ctx.save();
     ctx.transform(1, 0, -0.5, 0.3, 0, boxH/2 + 10);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)'; // 极弱白光
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
     ctx.fillRect(-boxW/2, -boxH/2, boxW, boxH);
     ctx.restore();
 
-    // 厚度 (侧面) - 纯黑/深灰
     ctx.fillStyle = '#171717'; 
     ctx.beginPath();
     ctx.moveTo(boxW/2, -boxH/2);
@@ -476,7 +504,6 @@ function Visualizer3D({ azimuth, elevation, distance, imagePreview }: { azimuth:
     ctx.lineTo(boxW/2, boxH/2);
     ctx.fill();
     
-    // 厚度 (顶面)
     ctx.fillStyle = '#262626'; 
     ctx.beginPath();
     ctx.moveTo(-boxW/2, -boxH/2);
@@ -485,7 +512,6 @@ function Visualizer3D({ azimuth, elevation, distance, imagePreview }: { azimuth:
     ctx.lineTo(-boxW/2 + thickness, -boxH/2 - thickness/2);
     ctx.fill();
 
-    // 正面内容
     if (loadedImage) {
         ctx.save();
         ctx.beginPath();
@@ -498,18 +524,15 @@ function Visualizer3D({ azimuth, elevation, distance, imagePreview }: { azimuth:
         const h = loadedImage.height * scale;
         ctx.drawImage(loadedImage, -w/2, -h/2, w, h);
         ctx.restore();
-        // 边框 - 金色微光
-        ctx.strokeStyle = '#d97706'; // Amber-600
+        ctx.strokeStyle = '#d97706';
         ctx.lineWidth = 1;
         ctx.strokeRect(-boxW/2, -boxH/2, boxW, boxH);
     } else {
-        // 默认黑块
         ctx.fillStyle = '#171717';
         ctx.fillRect(-boxW/2, -boxH/2, boxW, boxH);
         ctx.strokeStyle = '#d97706'; 
         ctx.lineWidth = 1;
         ctx.strokeRect(-boxW/2, -boxH/2, boxW, boxH);
-        // 金色笑脸
         ctx.strokeStyle = '#d97706';
         ctx.fillStyle = '#d97706';
         ctx.beginPath(); ctx.arc(-15, -10, 2, 0, Math.PI*2); ctx.fill();
@@ -518,7 +541,6 @@ function Visualizer3D({ azimuth, elevation, distance, imagePreview }: { azimuth:
     }
     ctx.restore();
 
-    // 3. 计算相机位置
     const r = baseRadius * distance; 
     const ringX = Math.cos(azRad) * r;
     const ringZ = Math.sin(azRad) * r;
@@ -531,38 +553,32 @@ function Visualizer3D({ azimuth, elevation, distance, imagePreview }: { azimuth:
     const floorPointX = centerX + sphereRingX;
     const floorPointY = (centerY + 30) + (sphereRingZ * 0.4);
 
-    // 4. 绘制辅助线 (虚线)
     ctx.beginPath();
-    ctx.setLineDash([2, 4]); // 更细的虚线
+    ctx.setLineDash([2, 4]);
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
     ctx.moveTo(floorPointX, floorPointY);
     ctx.lineTo(camX, camY);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // 中心连线
     ctx.beginPath();
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
     ctx.moveTo(centerX, centerY + 30);
     ctx.lineTo(floorPointX, floorPointY);
     ctx.stroke();
 
-    // 5. 绘制相机点 (高亮金点)
     ctx.beginPath();
-    ctx.fillStyle = '#f59e0b'; // Amber-500 Bright
+    ctx.fillStyle = '#f59e0b';
     ctx.shadowColor = '#f59e0b';
-    ctx.shadowBlur = 10; // 仅保留关键点的微光
+    ctx.shadowBlur = 10;
     ctx.arc(camX, camY, 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
     
-    // 视锥 (View Cone) - 白色半透明
     const angleToCenter = Math.atan2(centerY - camY, centerX - camX);
     ctx.save();
     ctx.translate(camX, camY);
     ctx.rotate(angleToCenter);
-    ctx.fillStyle = 'linear-gradient(90deg, rgba(255,255,255,0.1), transparent)'; // 尝试渐变填充
-    // Canvas gradient 比较麻烦，直接用纯色透明
     ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
     ctx.beginPath();
     ctx.moveTo(0, 0);
