@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Generation } from '../types';
-import { buildFileUrl } from '../services/api';
+import { buildFileUrl, getAuthToken } from '../services/api';
 
 const MODEL_LABELS: Record<string, string> = {
     'nano-banana-fast': 'nano banana flash',
@@ -42,6 +42,38 @@ function generateDownloadFilename(g: Generation): string {
 
     return `${promptText}_${timeStr}${ext}`;
 }
+
+const handleDownload = async (g: Generation, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!g.outputFile) return;
+
+    try {
+        const fileUrl = buildFileUrl(g.outputFile.id);
+        const filename = generateDownloadFilename(g);
+        const token = getAuthToken();
+
+        const headers: HeadersInit = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const res = await fetch(fileUrl, { headers });
+        if (!res.ok) throw new Error('下载失败');
+        
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    } catch (err) {
+        console.error('Download failed:', err);
+        alert('下载失败，请检查网络或登录状态');
+    }
+};
 
 export type ViewMode = 'grid' | 'list';
 
@@ -299,15 +331,15 @@ const GridItem: React.FC<{
                                 )}
                             </button>
                              {g.outputFile && (
-                                <a
-                                    href={buildFileUrl(g.outputFile.id, { download: true, filename: generateDownloadFilename(g) })}
+                                <button
+                                    onClick={(e) => handleDownload(g, e)}
                                     className="flex-1 flex items-center justify-center rounded-lg bg-white/10 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-white/20"
                                     title="下载"
                                 >
                                     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                                     </svg>
-                                </a>
+                                </button>
                             )}
                             <button
                                 onClick={() => onDelete(g)}
@@ -490,12 +522,12 @@ const ListItem: React.FC<{
                         生成同款
                     </button>
                     {g.outputFile && (
-                        <a
-                            href={buildFileUrl(g.outputFile.id, { download: true, filename: generateDownloadFilename(g) })}
+                        <button
+                            onClick={(e) => handleDownload(g, e)}
                             className="rounded-lg bg-white/5 px-3 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-white/10"
                         >
                             下载
-                        </a>
+                        </button>
                     )}
                     <button
                         onClick={() => onDelete(g)}

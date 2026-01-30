@@ -636,7 +636,7 @@ export default function EpisodeDetailsPage() {
           {/* 左侧 3/4 图片展示区 */}
           <div className="w-3/4 h-full relative flex items-center justify-center bg-gray-900">
             <img 
-              src={activeStoryboard.imageUrl || `/api/files/${activeStoryboard.imageFileId}`} 
+              src={activeStoryboard.imageUrl || buildFileUrl(activeStoryboard.imageFileId)} 
               className="max-h-full max-w-full object-contain"
               alt="Review" 
             />

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Generation } from '../types';
-import { buildFileUrl } from '../services/api';
+import { buildFileUrl, getAuthToken } from '../services/api';
 
 function Tag({ children }: { children: React.ReactNode }) {
   return (
@@ -78,6 +78,31 @@ function generateDownloadFilename(g: Generation): string {
 
   return `${timeStr}${ext}`;
 }
+
+const handleDownload = async (g: Generation) => {
+    if (!g.outputFile) return;
+    try {
+        const fileUrl = buildFileUrl(g.outputFile.id);
+        const filename = generateDownloadFilename(g);
+        const token = getAuthToken();
+        const headers: HeadersInit = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+        const res = await fetch(fileUrl, { headers });
+        if (!res.ok) throw new Error('Download failed');
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    } catch (e) {
+        console.error(e);
+        alert('下载失败');
+    }
+};
 
 export function GenerationCard(props: {
   generation: Generation;
@@ -176,12 +201,12 @@ export function GenerationCard(props: {
             </button>
 
             {g.outputFile ? (
-              <a
-                href={buildFileUrl(g.outputFile.id, { download: true, filename: generateDownloadFilename(g) })}
+              <button
+                onClick={() => handleDownload(g)}
                 className="rounded-lg bg-white/5 px-3 py-2 text-sm text-zinc-200 hover:bg-white/10"
               >
                 下载
-              </a>
+              </button>
             ) : (
               <button disabled className="rounded-lg bg-white/5 px-3 py-2 text-sm text-zinc-500">
                 下载

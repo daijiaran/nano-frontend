@@ -102,7 +102,7 @@ export default function NanoBanana3DStudio() {
         if (gen.status === 'queued' || gen.status === 'running') {
             setCurrentGenId(gen.id);
         } else if (gen.status === 'succeeded' && gen.outputFile) {
-            setGeneratedImage(gen.outputFile.url);
+            setGeneratedImage(buildFileUrl(gen.outputFile.id));
             setIsGenerating(false);
         } else if (gen.status === 'failed') {
             setErrorMsg(gen.failureReason || "生成失败");
@@ -456,7 +456,7 @@ function Visualizer3D({ azimuth, elevation, distance, imagePreview }: { azimuth:
 
     ctx.clearRect(0, 0, width, height);
     
-    const azRad = (azimuth - 90) * (Math.PI / 180);
+    const azRad = (azimuth + 90) * (Math.PI / 180);
     const elRad = elevation * (Math.PI / 180);
     
     ctx.save();
