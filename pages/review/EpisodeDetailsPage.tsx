@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Plus, ArrowLeft, Image as ImageIcon, ChevronLeft, ChevronRight, X, Edit, Download, CheckSquare, Square } from 'lucide-react';
+import { Plus, ArrowLeft, Image as ImageIcon, ChevronLeft, ChevronRight, X, Edit, Download, CheckSquare, Square, Trash2 } from 'lucide-react';
 import { DndContext, closestCenter, DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy, rectSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -8,7 +8,7 @@ import { CSS } from '@dnd-kit/utilities';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
-import { getStoryboards, createStoryboard, reorderStoryboards, updateStoryboardStatus, updateStoryboard } from '../../services/reviewService';
+import { getStoryboards, createStoryboard, reorderStoryboards, updateStoryboardStatus, updateStoryboard, deleteStoryboard } from '../../services/reviewService';
 import { ReviewStoryboard, User } from '../../types';
 import { Modal } from '../../components/Modal';
 import { api, buildFileUrl, getAuthToken } from '../../services/api';
@@ -23,9 +23,10 @@ interface SortableStoryboardCardProps {
   isBatchMode: boolean;
   isSelected: boolean;
   toggleSelection: (id: string) => void;
+  onDelete: (id: string) => void;
 }
 
-function SortableStoryboardCard({ item, onClick, onEdit, canEdit, isAdmin, isBatchMode, isSelected, toggleSelection }: SortableStoryboardCardProps) {
+function SortableStoryboardCard({ item, onClick, onEdit, canEdit, isAdmin, isBatchMode, isSelected, toggleSelection, onDelete }: SortableStoryboardCardProps) {
   const {
     attributes,
     listeners,
@@ -94,15 +95,27 @@ function SortableStoryboardCard({ item, onClick, onEdit, canEdit, isAdmin, isBat
       </div>
       {/* 编辑按钮 */}
       {canEdit && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit();
-          }}
-          className="absolute top-2 left-2 p-2 bg-blue-600 rounded-full text-white hover:bg-blue-700 transition opacity-0 group-hover:opacity-100"
-        >
-          <Edit size={16} />
-        </button>
+        <>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
+            className="absolute top-2 left-2 p-2 bg-blue-600 rounded-full text-white hover:bg-blue-700 transition opacity-0 group-hover:opacity-100 z-10"
+          >
+            <Edit size={14} />
+          </button>
+          
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(item.id);
+            }}
+            className="absolute top-2 left-10 p-2 bg-red-600 rounded-full text-white hover:bg-red-700 transition opacity-0 group-hover:opacity-100 z-10"
+          >
+            <Trash2 size={14} />
+          </button>
+        </>
       )}
       {/* 审阅按钮 (仅管理员可见) */}
       {isAdmin && (
@@ -163,6 +176,36 @@ export default function EpisodeDetailsPage() {
     if (episodeId) loadData();
     loadUser();
   }, [episodeId]);
+
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!isCreateOpen) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const file = items[i].getAsFile();
+          if (file) files.push(file);
+        }
+      }
+      
+      if (files.length > 0) {
+        if (editingId) {
+          setNewImage(files[0]);
+          setImagePreviewUrl(URL.createObjectURL(files[0]));
+        } else {
+          if (window.confirm(`检测到粘贴了 ${files.length} 张图片，是否直接上传？`)) {
+             handleBatchFiles(files);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [isCreateOpen, editingId, episodeId]);
 
   const loadUser = async () => {
     try {
@@ -381,6 +424,44 @@ export default function EpisodeDetailsPage() {
     setIsCreateOpen(true);
   };
 
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('确定要删除这个分镜吗？此操作不可恢复。')) return;
+    try {
+      await deleteStoryboard(id);
+      setStoryboards(prev => prev.filter(s => s.id !== id));
+    } catch (err: any) {
+      alert('删除失败: ' + err.message);
+    }
+  };
+
+  const handleBatchFiles = async (files: FileList | File[]) => {
+    if (!episodeId || files.length === 0) return;
+    setIsCreating(true);
+    setError(null);
+
+    let successCount = 0;
+    const fileArray = Array.from(files).filter(f => f.type.startsWith('image/'));
+
+    try {
+      for (const file of fileArray) {
+        const name = file.name.replace(/\.[^/.]+$/, "");
+        await createStoryboard(episodeId, name, file);
+        successCount++;
+      }
+      
+      setIsCreateOpen(false);
+      setNewImage(null);
+      setImagePreviewUrl(null);
+      loadData();
+    } catch (err: any) {
+      console.error('批量上传部分失败:', err);
+      setError(`部分上传失败，成功 ${successCount} 张。错误: ${err.message}`);
+      loadData();
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
   // 审阅逻辑
   const activeStoryboard = storyboards.find(s => s.id === reviewingId);
   const activeIndex = storyboards.findIndex(s => s.id === reviewingId);
@@ -506,6 +587,7 @@ export default function EpisodeDetailsPage() {
                   isBatchMode={isBatchMode}
                   isSelected={isSelected}
                   toggleSelection={toggleSelection}
+                  onDelete={handleDelete}
                 />
               );
             })}
@@ -528,7 +610,7 @@ export default function EpisodeDetailsPage() {
           <div>
             <label className="block text-sm font-medium mb-1">分镜图片 (必要)</label>
             <div 
-              className={`border-2 rounded p-4 text-center cursor-pointer transition-colors ${isDragOver ? 'border-blue-500 bg-blue-500/10' : 'border-gray-300 hover:border-blue-400'}`}
+              className={`border-2 rounded p-4 text-center cursor-pointer transition-colors border-dashed min-h-[150px] flex flex-col items-center justify-center ${isDragOver ? 'border-blue-500 bg-blue-500/10' : 'border-gray-600 hover:border-gray-400'}`}
               onDragOver={(e) => {
                 e.preventDefault();
                 setIsDragOver(true);
@@ -538,18 +620,33 @@ export default function EpisodeDetailsPage() {
                 e.preventDefault();
                 setIsDragOver(false);
                 const files = e.dataTransfer.files;
-                if (files.length > 0 && files[0].type.startsWith('image/')) {
-                  setNewImage(files[0]);
-                  setImagePreviewUrl(URL.createObjectURL(files[0]));
+                
+                if (!editingId && files.length > 0) {
+                   handleBatchFiles(files);
+                } else if (editingId && files.length > 0) {
+                   const file = files[0];
+                   if (file.type.startsWith('image/')) {
+                     setNewImage(file);
+                     setImagePreviewUrl(URL.createObjectURL(file));
+                   }
+                }
+              }}
+              onClick={() => {
+                if (!isCreating && !imagePreviewUrl) {
+                  const input = document.getElementById('file-upload-input') as HTMLInputElement;
+                  if (input) input.click();
                 }
               }}
             >
-              {imagePreviewUrl ? (
-                <div className="relative">
+              {isCreating ? (
+                 <div className="text-blue-400 animate-pulse">正在上传处理中...</div>
+              ) : imagePreviewUrl ? (
+                 <div className="relative">
                   <img src={imagePreviewUrl} alt="预览" className="max-w-full max-h-40 mx-auto object-contain" />
                   <button 
                     className="absolute top-2 right-2 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setNewImage(null);
                       setImagePreviewUrl(null);
                     }}
@@ -558,20 +655,27 @@ export default function EpisodeDetailsPage() {
                   </button>
                 </div>
               ) : (
-                <div>
+                <div className="text-gray-400">
+                  <Plus size={32} className="mx-auto mb-2" />
+                  <p>点击选择，或拖拽图片到这里 (支持多张)</p>
+                  <p className="text-xs text-gray-500 mt-1">支持 Ctrl+V 粘贴</p>
                   <input 
+                    id="file-upload-input"
                     type="file" 
+                    multiple
                     accept="image/*" 
+                    className="hidden"
                     onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        setNewImage(file);
-                        setImagePreviewUrl(URL.createObjectURL(file));
-                      }
+                       if (e.target.files && e.target.files.length > 0) {
+                           if (editingId) {
+                              setNewImage(e.target.files[0]);
+                              setImagePreviewUrl(URL.createObjectURL(e.target.files[0]));
+                           } else {
+                              handleBatchFiles(e.target.files);
+                           }
+                       }
                     }} 
-                    className="w-full"
                   />
-                  <p className="text-xs text-gray-500 mt-2">或拖拽图片到此处上传</p>
                 </div>
               )}
             </div>

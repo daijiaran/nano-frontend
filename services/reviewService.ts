@@ -138,12 +138,20 @@ export const reorderStoryboards = async (storyboardIds: string[]) => {
 };
 
 export const reorderEpisodes = async (episodeIds: string[]) => {
-  // 假设后端接口为 PUT /api/review/episodes/reorder，与 storyboards 保持一致
   const res = await fetch(`${API_BASE}/episodes/reorder`, {
     method: 'PUT',
     headers: { ...getHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ episodeIds }),
   });
   if (!res.ok) throw new Error('Failed to reorder');
+  return res.json();
+};
+
+export const deleteStoryboard = async (id: string) => {
+  const res = await fetch(`${API_BASE}/storyboards/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to delete storyboard');
   return res.json();
 };

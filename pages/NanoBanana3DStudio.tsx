@@ -3,6 +3,15 @@ import { Upload, Download, RefreshCw, Settings2, Move3d, ChevronDown, ChevronUp,
 import { api, buildFileUrl } from '../services/api';
 import type { ModelInfo, Generation } from '../types';
 
+const STORAGE_KEYS = {
+  PROMPT: 'nano_studio_prompt',
+  AZIMUTH: 'nano_studio_azimuth',
+  ELEVATION: 'nano_studio_elevation',
+  DISTANCE: 'nano_studio_distance',
+  MODEL: 'nano_studio_model',
+  GEN_ID: 'nano_studio_current_gen_id',
+};
+
 const getCameraPrompts = (azimuth: number, elevation: number, distance: number) => {
   const parts = [];
 
@@ -27,19 +36,33 @@ export default function NanoBanana3DStudio() {
   const [inputImage, setInputImage] = useState<File | null>(null);
   const [inputImagePreview, setInputImagePreview] = useState<string | null>(null);
   
-  const [prompt, setPrompt] = useState('一位身穿机能风外套的赛博朋克角色，站在雨夜的霓虹街道中');
+  const [prompt, setPrompt] = useState(() => 
+    localStorage.getItem(STORAGE_KEYS.PROMPT) || '一位身穿机能风外套的赛博朋克角色，站在雨夜的霓虹街道中'
+  );
   
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(() => 
+    !!localStorage.getItem(STORAGE_KEYS.GEN_ID)
+  );
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
-  const [currentGenId, setCurrentGenId] = useState<string | null>(null);
+  const [currentGenId, setCurrentGenId] = useState<string | null>(() => 
+    localStorage.getItem(STORAGE_KEYS.GEN_ID) || null
+  );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [azimuth, setAzimuth] = useState(45);   
-  const [elevation, setElevation] = useState(20); 
-  const [distance, setDistance] = useState(1.0);  
+  const [azimuth, setAzimuth] = useState(() => 
+    parseInt(localStorage.getItem(STORAGE_KEYS.AZIMUTH) || '45')
+  );   
+  const [elevation, setElevation] = useState(() => 
+    parseInt(localStorage.getItem(STORAGE_KEYS.ELEVATION) || '20')
+  ); 
+  const [distance, setDistance] = useState(() => 
+    parseFloat(localStorage.getItem(STORAGE_KEYS.DISTANCE) || '1.0')
+  );  
 
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [modelId, setModelId] = useState<string>('');
+  const [modelId, setModelId] = useState<string>(() => 
+    localStorage.getItem(STORAGE_KEYS.MODEL) || ''
+  );
   
   const [seed, setSeed] = useState(0);
   const [randomizeSeed, setRandomizeSeed] = useState(true);
@@ -64,6 +87,20 @@ export default function NanoBanana3DStudio() {
       setErrorMsg("模型列表加载失败");
     });
   }, []);
+
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.PROMPT, prompt); }, [prompt]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.AZIMUTH, azimuth.toString()); }, [azimuth]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.ELEVATION, elevation.toString()); }, [elevation]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.DISTANCE, distance.toString()); }, [distance]);
+  
+  useEffect(() => {
+    if (currentGenId) {
+      localStorage.setItem(STORAGE_KEYS.GEN_ID, currentGenId);
+      setIsGenerating(true);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.GEN_ID);
+    }
+  }, [currentGenId]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
