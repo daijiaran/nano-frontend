@@ -62,7 +62,7 @@ function SortableStoryboardCard({ item, onClick, onEdit, canEdit, isAdmin, isBat
       className={`relative aspect-video rounded-lg overflow-hidden border-2 cursor-pointer hover:shadow-md transition group ${statusColor}`}
     >
       <img 
-        src={item.imageUrl || buildFileUrl(item.imageFileId)} 
+        src={buildFileUrl(item.imageFileId)} 
         alt="storyboard" 
         className={`w-full h-full object-cover transition duration-300 ${isBatchMode && isSelected ? 'opacity-75' : ''}`} 
       />
@@ -224,28 +224,12 @@ export default function EpisodeDetailsPage() {
           return { success: false, id, error: '分镜未找到' };
         }
 
-        // 1. 关键修复：确保 fileUrl 不为 undefined
-        // 优先使用 item.imageUrl，如果没有则使用 buildFileUrl 构建
-        // 注意：这里我们不使用 ?download=1，因为我们需要二进制流而不是触发浏览器下载行为
-        if (!item.imageUrl && !item.imageFileId) {
-          console.warn(`分镜 ${id} (名称: ${item.name}) 缺少图片URL或文件ID，跳过下载`);
-          return { success: false, id, error: '缺少图片URL或文件ID' };
+        if (!item.imageFileId) {
+          console.warn(`分镜 ${id} (名称: ${item.name}) 缺少文件ID，跳过下载`);
+          return { success: false, id, error: '缺少文件ID' };
         }
 
-        // 2. 关键修复：使用相对路径避免 CORS 问题
-        // 如果 item.imageUrl 是绝对 URL，转换为相对路径
-        let fileUrl = item.imageUrl || buildFileUrl(item.imageFileId);
-        
-        // 如果 URL 包含完整域名，提取相对路径部分
-        if (fileUrl.includes('://')) {
-          try {
-            const urlObj = new URL(fileUrl);
-            fileUrl = urlObj.pathname + urlObj.search;
-            console.log(`转换绝对URL为相对路径: ${fileUrl}`);
-          } catch (e) {
-            console.warn(`URL 解析失败: ${fileUrl}`, e);
-          }
-        }
+        let fileUrl = buildFileUrl(item.imageFileId);
         
         console.log(`开始下载分镜 ${id}，URL: ${fileUrl}`);
 
@@ -636,7 +620,7 @@ export default function EpisodeDetailsPage() {
           {/* 左侧 3/4 图片展示区 */}
           <div className="w-3/4 h-full relative flex items-center justify-center bg-gray-900">
             <img 
-              src={activeStoryboard.imageUrl || buildFileUrl(activeStoryboard.imageFileId)} 
+              src={buildFileUrl(activeStoryboard.imageFileId)} 
               className="max-h-full max-w-full object-contain"
               alt="Review" 
             />
