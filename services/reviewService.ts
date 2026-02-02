@@ -155,3 +155,21 @@ export const deleteStoryboard = async (id: string) => {
   if (!res.ok) throw new Error('Failed to delete storyboard');
   return res.json();
 };
+
+export const deleteProject = async (id: string) => {
+  const res = await fetch(`${API_BASE}/projects/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to delete project');
+  return res.json();
+};
+
+export const deleteEpisode = async (id: string) => {
+  const res = await fetch(`${API_BASE}/episodes/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to delete episode');
+  return res.json();
+};

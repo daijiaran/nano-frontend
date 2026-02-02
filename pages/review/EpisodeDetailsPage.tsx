@@ -720,9 +720,9 @@ export default function EpisodeDetailsPage() {
 
       {/* 审阅全屏 Modal */}
       {reviewingId && activeStoryboard && (
-        <div className="fixed inset-0 z-50 bg-black flex text-white">
+        <div className="fixed inset-0 z-[150] bg-black flex text-white">
           {/* 左侧 3/4 图片展示区 */}
-          <div className="w-3/4 h-full relative flex items-center justify-center bg-gray-900">
+          <div className="w-3/4 h-full relative flex items-center justify-center" style={{backgroundColor: '#09090b'}}>
             <img 
               src={buildFileUrl(activeStoryboard.imageFileId)} 
               className="max-h-full max-w-full object-contain"
@@ -744,17 +744,16 @@ export default function EpisodeDetailsPage() {
             >
               <ChevronRight size={32} />
             </button>
-
-            <button 
-              onClick={() => setReviewingId(null)}
-              className="absolute top-4 left-4 p-2 bg-black/50 hover:bg-black/70 rounded-full"
-            >
-              <X size={24} />
-            </button>
           </div>
 
           {/* 右侧 1/4 操作区 */}
-          <div className="w-1/4 h-full bg-gray-800 p-6 flex flex-col border-l border-gray-700">
+          <div className="w-1/4 h-full p-6 flex flex-col border-l border-gray-700 relative" style={{backgroundColor: '#1a1b1d'}}>
+            <button 
+              onClick={() => setReviewingId(null)}
+              className="absolute top-4 right-4 p-2 bg-gray-700 hover:bg-gray-600 rounded-full transition-colors"
+            >
+              <X size={20} />
+            </button>
             <h2 className="text-xl font-bold mb-4">审阅操作</h2>
             <div className="mb-4">
               <span className={`px-2 py-1 rounded text-sm font-bold 

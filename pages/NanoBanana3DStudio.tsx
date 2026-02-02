@@ -37,7 +37,7 @@ export default function NanoBanana3DStudio() {
   const [inputImagePreview, setInputImagePreview] = useState<string | null>(null);
   
   const [prompt, setPrompt] = useState(() => 
-    localStorage.getItem(STORAGE_KEYS.PROMPT) || '一位身穿机能风外套的赛博朋克角色，站在雨夜的霓虹街道中'
+    localStorage.getItem(STORAGE_KEYS.PROMPT) || ''
   );
   
   const [isGenerating, setIsGenerating] = useState(() => 

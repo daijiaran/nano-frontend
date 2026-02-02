@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Plus, Clapperboard, ArrowLeft, Edit } from 'lucide-react';
+import { Plus, Clapperboard, ArrowLeft, Edit, Trash2 } from 'lucide-react';
 
 // --- 新增引用 ---
 import { DndContext, closestCenter, DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -13,7 +13,8 @@ import {
   createEpisode, 
   getProjects, 
   updateEpisode, 
-  reorderEpisodes // <--- 新增引入
+  reorderEpisodes,
+  deleteEpisode
 } from '../../services/reviewService';
 import { ReviewEpisode, ReviewProject, User } from '../../types';
 import { Modal } from '../../components/Modal';
@@ -24,6 +25,7 @@ interface SortableEpisodeCardProps {
   episode: ReviewEpisode;
   onClick: () => void;
   onEdit: () => void;
+  onDelete: (id: string) => void;
   canEdit: boolean;
 }
 
@@ -31,6 +33,7 @@ function SortableEpisodeCard({
   episode, 
   onClick, 
   onEdit, 
+  onDelete,
   canEdit 
 }: SortableEpisodeCardProps) {
   const {
@@ -73,15 +76,26 @@ function SortableEpisodeCard({
         </div>
       </div>
       {canEdit && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit();
-          }}
-          className="absolute top-2 right-2 p-2 bg-blue-600 rounded-full text-white hover:bg-blue-700 transition"
-        >
-          <Edit size={16} />
-        </button>
+        <>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
+            className="absolute top-2 right-2 p-2 bg-blue-600 rounded-full text-white hover:bg-blue-700 transition"
+          >
+            <Edit size={16} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(episode.id);
+            }}
+            className="absolute top-2 right-14 p-2 bg-red-600 rounded-full text-white hover:bg-red-700 transition"
+          >
+            <Trash2 size={16} />
+          </button>
+        </>
       )}
     </div>
   );
@@ -170,6 +184,16 @@ export default function ProjectDetailsPage() {
     setIsModalOpen(true);
   };
 
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('确定要删除这个单集吗？此操作不可恢复。')) return;
+    try {
+      await deleteEpisode(id);
+      setEpisodes(prev => prev.filter(e => e.id !== id));
+    } catch (err: any) {
+      alert('删除失败: ' + err.message);
+    }
+  };
+
   // --- 新增拖拽结束处理函数 ---
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -228,6 +252,7 @@ export default function ProjectDetailsPage() {
                   episode={ep}
                   onClick={() => navigate(`/review/episodes/${ep.id}`)}
                   onEdit={() => handleEdit(ep)}
+                  onDelete={handleDelete}
                   canEdit={!!canEdit}
                 />
               );

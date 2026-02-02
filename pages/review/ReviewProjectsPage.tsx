@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Film, Edit } from 'lucide-react';
-import { getProjects, createProject, updateProject } from '../../services/reviewService';
+import { Plus, Film, Edit, Trash2 } from 'lucide-react';
+import { getProjects, createProject, updateProject, deleteProject } from '../../services/reviewService';
 import { ReviewProject, User } from '../../types';
 import { Modal } from '../../components/Modal';
 import { api, buildFileUrl } from '../../services/api';
@@ -66,6 +66,16 @@ export default function ReviewProjectsPage() {
     setIsModalOpen(true);
   };
 
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('确定要删除这个项目吗？此操作不可恢复。')) return;
+    try {
+      await deleteProject(id);
+      setProjects(prev => prev.filter(p => p.id !== id));
+    } catch (err: any) {
+      alert('删除失败: ' + err.message);
+    }
+  };
+
   return (
     <div className="container mx-auto p-6 bg-[#09090b] min-h-full">
       {error && (
@@ -110,15 +120,26 @@ export default function ReviewProjectsPage() {
               </div>
             </div>
             {(user && (user.id === p.userId || user.role === 'admin')) && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleEdit(p);
-                }}
-                className="absolute top-2 right-2 p-2 bg-blue-600 rounded-full text-white hover:bg-blue-700 transition"
-              >
-                <Edit size={16} />
-              </button>
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEdit(p);
+                  }}
+                  className="absolute top-2 right-2 p-2 bg-blue-600 rounded-full text-white hover:bg-blue-700 transition"
+                >
+                  <Edit size={16} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(p.id);
+                  }}
+                  className="absolute top-2 right-14 p-2 bg-red-600 rounded-full text-white hover:bg-red-700 transition"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </>
             )}
           </div>
         ))}
